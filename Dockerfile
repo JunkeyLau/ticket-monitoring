@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
 
 COPY . .
 
-# 运行时可变状态全部落卷（config.yaml 以文件挂载，不入镜像）
+# 运行时可变状态全部落卷（配置通过 Compose 目录挂载，不入镜像）
 VOLUME ["/app/data", "/app/logs", "/app/user_data", "/app/debug"]
 
 ENV PYTHONUNBUFFERED=1

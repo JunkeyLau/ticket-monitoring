@@ -256,7 +256,8 @@
 ### Docker / NAS 部署
 
 ```bash
-cp config.example.yaml config.yaml   # 首次：建配置（网页里配也行）
+mkdir -p config-data
+cp -n config.example.yaml config-data/config.yaml  # 旧部署请先迁移现有 config.yaml
 docker compose up -d
 ```
 
@@ -454,3 +455,7 @@ Apache-2.0（见 [LICENSE](LICENSE)）。请遵守各平台服务条款；商用
 `docker-compose.pilot.example.yml` 是 Owner 主动选择的无密码试用模式，只需要设置 `TM_PUBLIC_ORIGIN`。Lucky 仅允许可信局域网访问、使用可信 HTTPS 证书并转发原始 Host 与 `X-Forwarded-Proto: https`；容器端口仍只绑定 NAS 回环地址，不要开放公网映射。确保其他容器无法访问后端容器网络，同一份 `user_data` 只能由一个实例使用。
 
 **无密码模式下任何可到达该入口的设备都能查看和修改整个控制台，并操作渠道登录会话。** HTTPS 只保护传输，Host/Origin 检查不是用户认证；远程登录中的临时令牌也不能鉴别访问者。确认 Lucky 入口没有通过路由器、IPv6 或其他路径暴露公网。试用结束应关闭此模式并改用受保护配置。
+
+### Docker 配置目录迁移
+
+从旧版升级前，先创建 `config-data/`，将原有 `config.yaml` 复制为 `config-data/config.yaml`；已有目标文件时不要覆盖。Compose 从该目录读取配置，自动保存使用同目录临时文件与原子替换。旧版挂载单个 `/app/config.yaml` 文件时无法执行原子替换，请先迁移再更新。`config-data/` 不进入 Git 或镜像。配置已被其他页面修改时，保存会提示冲突，请先核对再重新加载。

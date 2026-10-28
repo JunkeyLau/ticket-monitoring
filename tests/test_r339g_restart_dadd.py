@@ -90,7 +90,7 @@ def test_restart_ui_and_endpoint():
     assert ".rhint{display:flex" in src and ".rhint.armed{" in src
     # 保存成功分支：启动级差量取样必须在快照覆盖之前（覆盖后恒空集）
     i_cap = src.index("_schg=_startupChanged()")
-    i_clean = src.index("GLB_CLEAN=JSON.stringify(GLB)", i_cap)
+    i_clean = src.index("GLB_CLEAN=sentGlb", i_cap)
     assert i_cap < i_clean
     assert "if(_schg.length)_restartArmed();" in src
 
@@ -268,3 +268,30 @@ def test_restart_hint_two_states(page):
     page.wait_for_timeout(150)
     assert not page.evaluate(
         "document.getElementById('restartHint').style.display!=='none'")
+
+
+def test_automatic_save_keeps_proxy_address(page):
+    saved = []
+    def intercept(route):
+        if route.request.method == 'POST':
+            saved.append(route.request.post_data_json)
+            route.fulfill(status=200, content_type='application/json', body='{"ok":true,"users":1}')
+        else:
+            route.continue_()
+    page.route('**/api/config', intercept)
+    _open_cfg(page)
+    original_url = page.url
+    page.evaluate("setRoute(0,0,'alert_direct',2300)")
+    page.wait_for_function("!cfgCoreDirty()", timeout=10000)
+    assert saved and saved[-1]['users'][0]['routes'][0]['alert_direct'] == 2300
+    assert page.url == original_url
+
+
+def test_international_flight_guide_links_to_routes(page):
+    _open_cfg(page)
+    page.evaluate("showCfgPanel('watch')")
+    page.wait_for_selector('#cfgWatch details summary', timeout=8000)
+    page.locator('#cfgWatch details summary').click()
+    assert '出发地、目的地和出发日期' in page.locator('#cfgWatch details').inner_text()
+    page.locator('#cfgWatch details button').click()
+    assert page.evaluate('CFGPANEL') == 'users'

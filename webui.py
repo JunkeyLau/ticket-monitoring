@@ -13080,7 +13080,7 @@ function cfgIsDirty(){return (typeof CFG_WATCH!=='undefined'&&!!CFG_WATCH.dirty)
   const nb=$('navDirty');if(nb)nb.style.display=(dirty&&VIEW!=='cfg')?'':'none';
   const n=dirty?cfgDirtyCount():0;
   const sb=$('savebar');
-  if(sb){sb.classList.toggle('on',dirty&&VIEW==='cfg');   /* 显隐走 .on 过渡类（display 恒 flex）。toggle 必须在视图早退之前——cfg 弄脏后切监控，浮条不回收就永久浮在监控页右下 */
+  if(sb){sb.classList.toggle('on',dirty&&VIEW==='cfg'&&(CFG_AUTO_ERROR||(typeof CFG_WATCH!=='undefined'&&CFG_WATCH.dirty)));   /* 显隐走 .on 过渡类（display 恒 flex）。toggle 必须在视图早退之前——cfg 弄脏后切监控，浮条不回收就永久浮在监控页右下 */
    const st=$('saveTxt');if(st){const t=n+' 处未保存的修改';
     if(st.textContent!==t)st.textContent=t;}   /* 同值跳过：textContent 无条件重写=每 800ms 删+插文本节点的常驻 childList 脉冲（MutationObserver 扩展被持续唤醒，nrSay 同律） */}
   if(VIEW!=='cfg')return;   /* 监控页跳过用户卡 DOM 巡检 */
@@ -13121,11 +13121,32 @@ document.querySelectorAll('#cfgnav .cnav').forEach(c=>{
 /* showCfgPanel 尾挂登录分区观察：进入分区立即强刷+启动 30s 轮询
    （切走由轮询自灭），退出登录分区不额外动作零常驻 */
 const _scp=showCfgPanel;
-showCfgPanel=function(id,silent){_scp(id,silent);
- if(id==='login'){loadLogin(null,true);lgWatchStart();}
- if(id==='watch'){setTimeout(()=>{try{loadCfgWatch()}catch(e){toast('航班监控加载失败：'+(e.message||e),'err')}},0)}};
+showCfgPanel=function(id,silent){
+ // Watch editor is embedded inside the selected user card, not panel-watch.
+ if(id==='watch'){
+  _scp('users',silent);
+  if(CFG&&CFG.length){
+   const i=OPEN_USER>=0?OPEN_USER:0;
+   const header=document.querySelector('#cfgform .uhead2[data-u="'+i+'"]');
+   if(header&&header.getAttribute('aria-expanded')!=='true')toggleUser(header);
+   const host=$('uwatch-'+i),editor=$('cfgWatch');
+   if(host&&editor&&editor.parentNode!==host)host.appendChild(editor);
+   setTimeout(()=>{try{loadCfgWatch();if(editor)editor.scrollIntoView({block:'start',behavior:'smooth'});}catch(e){toast('航班监控加载失败：'+(e.message||e),'err')}},0);
+  }
+  return;
+ }
+ _scp(id,silent);
+ if(id==='login'){loadLogin(null,true);lgWatchStart();}};
+function goWatchRouteSetup(){
+ showCfgPanel('users');
+ const i=OPEN_USER>=0?OPEN_USER:0;
+ const header=document.querySelector('#cfgform .uhead2[data-u="'+i+'"]');
+ if(header&&header.getAttribute('aria-expanded')!=='true')toggleUser(header);
+ const host=$('uwatch-'+i),card=host&&host.closest('.ucard'),button=card&&card.querySelector('.addrbtn');
+ if(button){button.scrollIntoView({block:'center',behavior:'smooth'});button.focus({preventScroll:true});}
+}
 window.addEventListener('beforeunload',e=>{
- if(cfgIsDirty()){e.preventDefault();e.returnValue='';}});
+ if(cfgIsDirty()||cfgHasPendingInput()){e.preventDefault();e.returnValue='';}});
 let _rsT=null;window.addEventListener('resize',()=>{
  clearTimeout(_rsT);_rsT=setTimeout(()=>{
   if(S&&S.users&&S.users.length)chart();
@@ -13607,7 +13628,7 @@ async function loginFinish(plat,b,slot){if(b&&b.classList.contains('busy'))retur
  loadLogin(null,true);}
 setInterval(()=>{if(!document.hidden)loadChannelState(false)},2000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)loadChannelState(true)});
-let GLB={interval_minutes:30},GLB_ABS={},GLB_CLEAN='';
+let GLB={interval_minutes:30},GLB_ABS={},GLB_CLEAN='',CFG_REVISION='',CFG_PROXY_MODE=false;
 let GLB_STORE={},RUNTIME={},RESTART={};   /* r342 路径元数据/运行时身份/重启差量 */
 let CFGST='all';   /* 航线状态筛选：all/on/off/todo */
 let _AIRMODE={};   /* 航司快捷添加当前模式（in/out，按航线记忆） */
@@ -13615,7 +13636,7 @@ let AIRALIAS={alias:{},name:{}};   /* 航司别称字典（/api/config airline_a
 async function loadCfg(){try{
  const r=await fetch('/api/config');const j=await r.json();
  if(!j||!Array.isArray(j.users))throw new Error('配置接口响应异常');   // 500 错误体当数据曾静默渲染「0 用户+出厂全局参数」假界面（importCfg 同律守卫）
- CFG=j.users||[];CITY=j.city||{};CITYX=j.cityx||{};AIRALIAS=j.airline_alias||{alias:{},name:{}};
+ CFG=j.users||[];CFG_REVISION=j.revision||'';CFG_PROXY_MODE=!!j.proxy_mode;CITY=j.city||{};CITYX=j.cityx||{};AIRALIAS=j.airline_alias||{alias:{},name:{}};
  INTL=j.intl||{map:{},hot:[],mainland:[]};
  INTLN=Object.fromEntries(Object.entries(INTL.map||{}).map(([c,n])=>[n,c]));
  INTL_LOADED=true;
@@ -14069,6 +14090,7 @@ function cfgWatchRender(){
   +'<span class="cw-sum"><b>'+CFG_WATCH.list.length+'</b> 个关注 · <b>'+CFG_WATCH.list.filter(w=>w.active!==false&&w.inScope).length+'</b> 个监控中</span><span class="cw-sp"></span>'
   +'<button class="btn2 primary" type="button" data-cwact="add"'+(CFG_WATCH.addOpen||CFG_WATCH.edit?' style="display:none"':'')+'>＋ 添加关注航班</button><button class="btn2" type="button" onclick="cfgWatchRefresh()">刷新清单</button></div>'
   +cfgWatchRouteChipsHTML()+cfgWatchFilterBarHTML()
+  +'<details class="cw-meta" style="margin:8px 0"><summary>如何关注国际航班？</summary><p>① 在「用户与航线」添加出发地、目的地和出发日期（国内、国际操作一样），完成后自动保存。</p><p>② 回到这里点击「添加关注航班」，选择该航线和日期；可以从采集结果选航班，也可以手动填写航班号与起降时刻。</p><p>③ 按需设置目标价和渠道，点击「加入监控」。没有采集结果时，先完成航线设置并等待扫描。</p><button type="button" class="btn2" onclick="goWatchRouteSetup()">去添加航线</button></details>'
   +'<div class="cfgwatch-form" id="cwForm" style="'+((CFG_WATCH.addOpen||CFG_WATCH.edit)?'':'display:none')+'">'
   +'<div class="cwf-modebar"><div class="cwf-mode" role="group" aria-label="航线来源"><button type="button" class="'+(mode==='route'?'on':'')+'" data-cwmode="route">已配置航线</button>'+(CFG_WATCH.edit?'<button type="button" class="'+(mode==='custom'?'on':'')+'" data-cwmode="custom">历史身份</button>':'')+'</div><span class="cwf-scope" id="cwScope">关注航班必须是该航线+日期明细中的指定航班</span></div>'
   +'<div id="cwRouteFields" style="'+(mode==='custom'?'display:none':'')+'"><div class="cwf-grid"><label class="cwf-field cwf-route">关注航线<select id="cwRoute" onchange="cfgWatchFormRefresh()">'+(rs.length?rs.map((r,i)=>'<option value="'+i+'">'+esc((r.from_name||r.from||'')+'→'+(r.to_name||r.to||''))+'</option>').join(''):'<option value="">未配置航线</option>')+'</select></label>'
@@ -16300,6 +16322,7 @@ function delRun(prefix,i,j,a,b){const rs=CFG[i].routes[j];
 function defDate(){const d=new Date(Date.now()+14*864e5);
  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function cfgErr(m){/* 校验失败提示必达：页面顶部 cfgmsg + 右下 toast 双通道 */
+ if(typeof CFG_SAVE_AUTO!=='undefined'&&CFG_SAVE_AUTO){CFG_AUTO_ERROR=true;$('cfgmsg').textContent='待完善：'+m;return;}
  $('cfgmsg').textContent=m;toast(m,'err');}
 /* 配置即时校验单源表：glcell 数字项输入即校验（glbCheck），saveCfg
    复用同一张表——校验规则两处漂移曾是「保存才首错即停」的根因 */
@@ -16329,7 +16352,62 @@ function glbCheck(el,returnMsg){const r=GLB_RANGES.find(x=>x.id===el.id);
   errDiv.style.display=m?'block':'none';}
  el.classList.toggle('invalid',!!m);
  return m;}
-async function saveCfg(){
+// Auto-save complete configuration after editing pauses. Draft flight forms
+// stay explicit because their identity is incomplete until the user submits.
+let CFG_SAVE_FLIGHT=null,CFG_AUTO_CANDIDATE='',CFG_AUTO_SINCE=0,CFG_AUTO_TRIED='',CFG_AUTO_ERROR=false,CFG_SAVE_AUTO=false;
+let CFG_EDIT_EPOCH=0;const CFG_PENDING_INPUTS=new Set(),CFG_INPUT_BASE=new WeakMap();
+document.addEventListener('focusin',ev=>{const el=ev.target;if(el&&el.matches&&el.matches('textarea,input:not([type=checkbox]):not([type=radio])'))CFG_INPUT_BASE.set(el,el.value);});
+function cfgHasPendingInput(){for(const e of CFG_PENDING_INPUTS){if(!e.isConnected)CFG_PENDING_INPUTS.delete(e);}return CFG_PENDING_INPUTS.size>0;}
+function cfgCoreDirty(){
+ if(!CFG||!CFG_CLEAN||!GLB_CLEAN)return false;
+ return JSON.stringify(_canon(CFG,JSON.parse(CFG_CLEAN)))!==JSON.stringify(_canon(JSON.parse(CFG_CLEAN),null))
+  ||JSON.stringify(_canon(GLB,JSON.parse(GLB_CLEAN)))!==JSON.stringify(_canon(JSON.parse(GLB_CLEAN),null));
+}
+function cfgAutoTick(){
+ if(!CFG||!CFG_CLEAN||!GLB_CLEAN||CFG_SAVE_FLIGHT)return;
+ let dirty=false;try{dirty=cfgCoreDirty();}catch(e){return;}
+ if(!dirty){CFG_AUTO_CANDIDATE='';CFG_AUTO_TRIED='';return;}
+ const sig=JSON.stringify([CFG,GLB]);
+ if(sig!==CFG_AUTO_CANDIDATE){CFG_AUTO_CANDIDATE=sig;CFG_AUTO_SINCE=Date.now();CFG_AUTO_ERROR=false;return;}
+ if(sig===CFG_AUTO_TRIED||Date.now()-CFG_AUTO_SINCE<2500)return;
+ const active=document.activeElement;
+ if(active&&active.closest&&active.closest('#cfgview')&&
+    (active.matches('textarea,select')||active.matches('input:not([type=checkbox]):not([type=radio])')))return;
+ if(typeof CFG_WATCH!=='undefined'&&CFG_WATCH.dirty)return;
+ CFG_AUTO_TRIED=sig;saveCfg(true);
+}
+for(const eventName of ['input','change','click','keydown']){
+ document.addEventListener(eventName,ev=>{
+  const el=ev.target;
+  if(el&&el.closest&&el.closest('#cfgview')){
+   CFG_AUTO_SINCE=Date.now();
+   if(eventName==='input'||eventName==='change'){
+    CFG_EDIT_EPOCH++;
+    if(!el.closest('#cwForm')&&el.matches('textarea,input:not([type=checkbox]):not([type=radio])')){
+     if(eventName==='input'&&(!CFG_INPUT_BASE.has(el)||CFG_INPUT_BASE.get(el)!==el.value))CFG_PENDING_INPUTS.add(el);else CFG_PENDING_INPUTS.delete(el);
+    }
+   }
+  }
+ },false);
+}
+setInterval(cfgAutoTick,800);
+async function saveCfg(auto=false){
+ if(CFG_SAVE_FLIGHT)return CFG_SAVE_FLIGHT;
+ CFG_SAVE_AUTO=auto;
+ CFG_SAVE_FLIGHT=saveCfgImpl(auto);
+ try{return await CFG_SAVE_FLIGHT;}
+ finally{CFG_SAVE_FLIGHT=null;CFG_SAVE_AUTO=false;}
+}
+// Only redirect when the browser itself used the previously configured port.
+// A reverse proxy can expose a different port, which must stay unchanged.
+function cfgPortRedirect(href, previous, next, isProxy=false){
+ const url=new URL(href);
+ const browserPort=Number(url.port||(url.protocol==='https:'?443:80));
+ if(isProxy||Number(previous)===Number(next)||browserPort!==Number(previous))return '';
+ url.port=String(next);
+ return url.href;
+}
+async function saveCfgImpl(auto=false){
  if(!CFG){cfgErr('❌ 配置尚未载入，请稍候再保存');return;}
  // R50 CI 实锤：boot INTL 表在途时保存六航线 demo 配置（含国际名
  // 曼谷素万那普）→ _cnorm intl 门整卡「不支持的城市」。校验前置
@@ -16437,38 +16515,46 @@ async function saveCfg(){
     +'：中转最短衔接 '+mn+' 分大于最长 '+mx+' 分，将永远无中转可选';break;}}
  if(_badLay){cfgErr('❌ '+_badLay);return;}
  if(!CFG.length){cfgErr('❌ 至少一个用户');return;}
- $('cfgmsg').textContent='保存中…';
+ $('cfgmsg').textContent=auto?'自动保存中…':'保存中…';
+ const sentCfg=JSON.stringify(CFG),sentGlb=JSON.stringify(GLB),sentRevision=CFG_REVISION,editEpoch=CFG_EDIT_EPOCH;
  try{const r=await fetch('/api/config',{method:'POST',
   headers:{'Content-Type':'application/json'},
-  body:JSON.stringify({users:CFG,globals:GLB})});
+  body:JSON.stringify({users:JSON.parse(sentCfg),globals:JSON.parse(sentGlb),revision:sentRevision})});
   const j=await r.json();
   $('cfgmsg').textContent=j.ok?'✅ 已保存，'+j.users+' 个用户已热重载生效':'❌ '+(j.err||'失败');;
-  if(!j.ok)toast('❌ 保存失败：'+(j.err||''),'err');
+  if(!j.ok){CFG_AUTO_ERROR=true;toast('❌ 保存失败：'+(j.err||''),'err');}
   if(j.ok){
    SRX_RADAR_CFG.users=null;SRX_RADAR_CFG.busy=null;   /* 雷达回读缓存随保存作废 */
-   const oldPort=location.port;
+   let oldConfigPort=Number(GLB.port)||8765;
+   try{oldConfigPort=Number(JSON.parse(GLB_CLEAN||'{}').port)||8765;}catch(e){}
+   const newConfigPort=Number(JSON.parse(sentGlb).port)||8765;
+   const portRedirect=cfgPortRedirect(location.href,oldConfigPort,newConfigPort,CFG_PROXY_MODE);
    /* 启动级差量在快照覆盖前取样：保存成功即转「需重启」强横幅
       （编辑态弱横幅由 syncRestartHint 负责，两态不共用一词面） */
    const _schg=_startupChanged();
    if(j.storage)GLB_STORE=j.storage;
    if(j.restart)RESTART=j.restart;
-   CFG_CLEAN=JSON.stringify(CFG);GLB_CLEAN=JSON.stringify(GLB);
+   CFG_CLEAN=sentCfg;GLB_CLEAN=sentGlb;CFG_REVISION=j.revision||'';CFG_AUTO_ERROR=false;
+   const active=document.activeElement;
+   const editingFocused=active&&active.closest&&active.closest('#cfgview')&&active.matches('textarea,select,input:not([type=checkbox]):not([type=radio])');
+   const changedWhileSaving=JSON.stringify(CFG)!==sentCfg||JSON.stringify(GLB)!==sentGlb||CFG_EDIT_EPOCH!==editEpoch||cfgHasPendingInput()||editingFocused||(typeof CFG_WATCH!=='undefined'&&(CFG_WATCH.addOpen||CFG_WATCH.edit));
    if(_schg.length)_restartArmed();
    if(RESTART&&RESTART.required)_restartArmed();   /* 刷新后仍可见：启动快照差量单源 */
-   try{buildForm();}catch(e){}
-   if(String(GLB.port||8765)!==oldPort){
+   if(!changedWhileSaving){try{buildForm();}catch(e){}}
+   if(portRedirect){
     if(window.toast)toast('🎛 控制台端口已切换至 '+GLB.port+'，正在跳转…','ok');
-    setTimeout(()=>{location.href=location.protocol+'//'+location.hostname
-     +':'+GLB.port+location.pathname;},1600);
+    setTimeout(()=>{location.href=portRedirect;},1600);
+   }else if(oldConfigPort!==newConfigPort){
+    toast('控制台内部端口已更改；请同步更新反向代理目标端口','ok');
    }else{
     const _pending=new Set([..._schg,...((RESTART&&RESTART.changed)||[])])
       .size;
-    toast(_pending?('💾 已保存；'+_pending+' 项启动级配置需重启生效'):'💾 已保存，全部配置热生效','ok');
+    if(!auto)toast(_pending?('💾 已保存；'+_pending+' 项启动级配置需重启生效'):'💾 已保存，全部配置热生效','ok');
     try{renderRestartCenter();}catch(e){}
     setTimeout(()=>{load();},800);
     setTimeout(()=>{const m=$('cfgmsg');
      if(m&&m.textContent.charAt(0)==='✅')m.textContent='';},6000);}}
- }catch(e){cfgErr('❌ 请求失败: '+e);}}
+ }catch(e){CFG_AUTO_ERROR=true;cfgErr('❌ 请求失败: '+e);}}
 /* ===== 配置搜索：字段级过滤（srow/rline 容器按可见子块收敛；
    buildForm 重建后按 CFGQ 重放，搜索状态不丢 ===== */
 function cfgSearchClear(){/* 搜索态复位单源：CFGQ/输入框/命中计数/
@@ -24954,6 +25040,7 @@ class _Srv(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
+_CONFIG_FILE_LOCK = threading.RLock()
 _PROXY_AUTH_LOCK = threading.Lock()
 _PROXY_AUTH_FAILURES = []
 
@@ -25093,6 +25180,12 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_error(405)
 
     def do_GET(self):
+        if self.path == '/api/config':
+            with _CONFIG_FILE_LOCK:
+                return self._do_GET()
+        return self._do_GET()
+
+    def _do_GET(self):
         # A fixed, data-free liveness probe only for the container itself.
         if self.path == '/healthz':
             import ipaddress
@@ -25720,8 +25813,10 @@ class _Handler(BaseHTTPRequestHandler):
                     self._json(_demo_config_payload())
                     return
                 import yaml as _y
-                with open(_State.config_path, encoding="utf-8") as _yf:
-                    cfg = _y.safe_load(_yf)
+                with open(_State.config_path, "rb") as _yf:
+                    _config_bytes = _yf.read()
+                _revision = hashlib.sha256(_config_bytes).hexdigest()
+                cfg = _y.safe_load(_config_bytes) or {}
                 # 物化生效值：win_toast 缺省即开启——补写显式布尔，让配置页
                 # 勾选态与 config.yaml 都反映真实状态（所见即所存）
                 for u0 in (cfg.get("users") or []):
@@ -25730,6 +25825,8 @@ class _Handler(BaseHTTPRequestHandler):
                     u0["notifier"] = n0
                 from wizard import CITY
                 self._json({"users": cfg.get("users") or [],
+                            "revision": _revision,
+                            "proxy_mode": bool(os.environ.get("TM_PROXY_PROTECTED") == "1"),
                             "city": CITY,
                             "cityx": _cityx(), "airline_alias": _airalias(),
                             "intl": _intl_payload(),
@@ -25844,7 +25941,11 @@ class _Handler(BaseHTTPRequestHandler):
         import io as _io
         self.rfile = _io.BytesIO(_raw)
         try:
-            self._do_POST()
+            if self.path == "/api/config":
+                with _CONFIG_FILE_LOCK:
+                    self._do_POST()
+            else:
+                self._do_POST()
         finally:
             self.rfile = _orig
 
@@ -25859,8 +25960,14 @@ class _Handler(BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(length).decode("utf-8"))
                 import yaml as _y
-                with open(st.config_path, encoding="utf-8") as _yf:
-                    cfg = _y.safe_load(_yf) or {}
+                with open(st.config_path, "rb") as _yf:
+                    _config_bytes = _yf.read()
+                _current_revision = hashlib.sha256(_config_bytes).hexdigest()
+                if body.get("revision") != _current_revision:
+                    self._json({"ok": False, "conflict": True,
+                                "err": "配置已被其他页面修改，请先核对并重新加载"}, 409)
+                    return
+                cfg = _y.safe_load(_config_bytes) or {}
                 cfg["users"] = body.get("users") or []
                 glb = body.get("globals") or {}
                 if glb.get("interval_minutes"):
@@ -25974,9 +26081,28 @@ class _Handler(BaseHTTPRequestHandler):
                     n0 = u0.get("notifier") or {}
                     n0["win_toast"] = bool(n0.get("win_toast", True))
                     u0["notifier"] = n0
-                with open(st.config_path, "w", encoding="utf-8") as f:
-                    _y.safe_dump(cfg, f, allow_unicode=True,
-                                 sort_keys=False, width=100)
+                # Write next to the configuration and publish with one rename.
+                # A single-file Docker bind mount cannot be replaced: mount the
+                # parent directory instead; an error leaves the original intact.
+                import tempfile as _tempfile
+                import stat as _stat
+                _config_dir = os.path.dirname(os.path.abspath(st.config_path))
+                _temp_path = None
+                try:
+                    with _tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                            dir=_config_dir, prefix=".config-", suffix=".tmp", delete=False) as f:
+                        _temp_path = f.name
+                        os.chmod(_temp_path, _stat.S_IMODE(os.stat(st.config_path).st_mode))
+                        _y.safe_dump(cfg, f, allow_unicode=True, sort_keys=False, width=100)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    with open(_temp_path, "rb") as f:
+                        _new_revision = hashlib.sha256(f.read()).hexdigest()
+                    os.replace(_temp_path, st.config_path)
+                    _temp_path = None
+                finally:
+                    if _temp_path and os.path.exists(_temp_path):
+                        os.unlink(_temp_path)
                 n = st.reload_cb() if st.reload_cb else 0
                 # 签名缓存作废：签名五元组只含运行时 users 形态，cfg 派生
                 # 键（suspended 等）在「只改停用航线配置」场景下 users 序列
@@ -25985,7 +26111,7 @@ class _Handler(BaseHTTPRequestHandler):
                 st.logger.info("[web配置] 已保存并热重载：%d 用户", n)
                 # 保存回执带路径元数据与启动差量：前端保存后无需再
                 # 拉一次配置即可点亮「需重启」与迁移预案
-                self._json({"ok": True, "users": n,
+                self._json({"ok": True, "users": n, "revision": _new_revision,
                             "storage": _storage_view(cfg),
                             "restart": _restart_view(cfg)})
             except Exception as e:

@@ -1,5 +1,5 @@
 # NAS / 服务器容器化部署：
-#   cp config.example.yaml config.yaml   # 首次：建配置（网页里配也行）
+#   mkdir -p config-data && cp config.example.yaml config-data/config.yaml  # 首次配置
 #   docker compose up -d
 #   浏览器打开 http://NAS_IP:8765
 services:
@@ -8,10 +8,11 @@ services:
     # 预构建镜像（与 Release 同源时可用，免去本机构建）：
     # image: ghcr.io/dengmeiluan/ticket-monitoring:latest
     container_name: ticket-monitoring
+    command: ["python", "main.py", "-c", "/app/config-data/config.yaml"]
     ports:
       - "8765:8765"
     volumes:
-      - ./config.yaml:/app/config.yaml
+      - ./config-data:/app/config-data
       - ./data:/app/data
       - ./user_data:/app/user_data
       - ./logs:/app/logs

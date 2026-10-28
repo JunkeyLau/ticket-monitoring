@@ -286,3 +286,6 @@ docs/INTL_CALIBRATION.md
 .env.*
 compose.remote-login.yaml
 docker-compose.lucky.yml
+
+# User configuration and atomic-save temporary files
+/config-data/
