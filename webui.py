@@ -12859,9 +12859,12 @@ function cityPanelPlace(){
 function cityPanelOpen(el){
  if(el&&el.id&&document.getElementById(el.id+'Drop'))cwCityHide(el);
  if(!_cpBuilt||!$('cpbody').querySelector('.cp-sec')){cityPanelBuild();_cpBuilt=true}
- _cpEl=el;
  const p=$('citypanel');
- p.dataset.prevOverflow=document.body.style.overflow||'';
+ // Capture the previous scroll state only once, even if an async city-data
+ // request or another trigger opens the already-visible panel again.
+ if(p.style.display==='none')p.dataset.prevOverflow=document.body.style.overflow||'';
+ if(_cpEl&&_cpEl!==el&&_cpEl.setAttribute)_cpEl.setAttribute('aria-expanded','false');
+ _cpEl=el;
  p.style.display='flex';
  document.body.style.overflow='hidden';
  if(el&&el.setAttribute)el.setAttribute('aria-expanded','true');
@@ -12886,7 +12889,7 @@ $('citypanel').addEventListener('keydown',e=>{
 document.addEventListener('focusin',e=>{
  const p=$('citypanel');
  if(p.style.display!=='none'&&!p.contains(e.target)&&e.target!==_cpEl){try{$('cpq').focus()}catch(_){}}},true);
-function cityPanelClose(){const p=$('citypanel');p.style.display='none';p.style.maxHeight='';
+function cityPanelClose(){const p=$('citypanel');if(p.style.display==='none')return;p.style.display='none';p.style.maxHeight='';
  document.body.style.overflow=p.dataset.prevOverflow||'';
  const el=_cpEl;_cpEl=null;
  if(el&&el.setAttribute)el.setAttribute('aria-expanded','false');

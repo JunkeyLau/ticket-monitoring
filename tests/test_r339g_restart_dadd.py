@@ -295,3 +295,20 @@ def test_international_flight_guide_links_to_routes(page):
     assert '出发地、目的地和出发日期' in page.locator('#cfgWatch details').inner_text()
     page.locator('#cfgWatch details button').click()
     assert page.evaluate('CFGPANEL') == 'users'
+
+
+def test_city_panel_reopening_does_not_leave_page_scroll_locked(page):
+    """Repeated opens must restore the original page scroll state on close."""
+    _open_cfg(page)
+    page.locator("#cfgview [aria-label='打开出发城市全量选择']").first.click()
+    page.wait_for_selector('#citypanel', state='visible')
+    page.evaluate("cityPanelOpen(document.querySelector(\"#cfgview [id^='rtFrom_']\"))")
+    page.locator('#citypanel .cp-x').click()
+    assert page.evaluate("document.body.style.overflow") == ''
+    page.evaluate("window.scrollTo(0, 0)")
+    page.mouse.move(40, 400)
+    page.mouse.wheel(0, 600)
+    page.wait_for_timeout(300)
+    assert page.evaluate('window.scrollY') > 0
+    page.evaluate("document.body.style.overflow='hidden';cityPanelOpen(document.querySelector(\"#cfgview [id^='rtFrom_']\"));cityPanelClose()")
+    assert page.evaluate("document.body.style.overflow") == 'hidden'
