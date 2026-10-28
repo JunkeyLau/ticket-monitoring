@@ -26,3 +26,16 @@ user_data_free
 build
 dist
 _scratch
+
+# Private proxy credentials and local configuration must never enter an image.
+.env
+.env.*
+.envrc
+.session-secret
+*.pem
+*.key
+*.crt
+compose*.yml
+compose*.yaml
+docker-compose*.yml
+docker-compose*.yaml

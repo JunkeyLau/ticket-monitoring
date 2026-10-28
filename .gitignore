@@ -281,3 +281,8 @@ _build_check/
 
 # 国际校准台账（内部工作账本，同 HANDOFF 本地维护不入公开树）
 docs/INTL_CALIBRATION.md
+
+# Local proxy secrets and local deployment overrides
+.env.*
+compose.remote-login.yaml
+docker-compose.lucky.yml

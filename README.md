@@ -442,3 +442,9 @@ Apache-2.0（见 [LICENSE](LICENSE)）。请遵守各平台服务条款；商用
 在容器环境中设置 `TM_REMOTE_LOGIN=1` 与 `TM_REMOTE_LOGIN_SECRET`（至少 16 个 ASCII 字符，推荐使用随机生成的长密码）。密码应由 Owner 私下配置，不写入 Git。连接隧道后在控制台点击渠道登录，输入该密码；在远程画面中点击输入框，再在画面下方的密码输入框输入文字，也支持扫码、滚动和拖动。完成后点「登录完成并保存」，再检查真实渠道状态；取消不会保存会话。会话默认 10 分钟超时。使用完可撤销开关并重启容器。
 
 远程画面、输入和一次性会话令牌经过控制台连接，需确保连接受信任；截图不落盘。验证码或风控可能阻止无头浏览器，且远程图像操作存在延迟，不能保证所有平台的登录或拖拽验证通过。项目不会自动将访问者本机浏览器的 Cookie 导入 NAS。
+
+### 使用 Lucky 的局域网 HTTPS 入口
+
+启用 `TM_PROXY_PROTECTED=1`、`TM_PUBLIC_ORIGIN` 与随机 `TM_WEB_PASSWORD`（至少 24 字符）后，整个控制台及 API 均要求 HTTP Basic 认证，用户名为 `admin`。Origin 必须是确切的 HTTPS 入口，例如 `https://ticket.example.com`，不要加路径或末尾斜杠。所有 POST 必须携带与该入口完全一致的 Origin；代理必须保留浏览器的 Host（包括非默认端口）并设置 `X-Forwarded-Proto: https`。远程登录仍需独立设置 `TM_REMOTE_LOGIN=1` 和 `TM_REMOTE_LOGIN_SECRET`。
+
+后端端口必须仅绑定 NAS 回环地址，确保代理是唯一入口，且仅在可信网络使用；容器内部仍监听容器网络，需隔离不可信的其他容器；切勿将 `X-Forwarded-Proto` 视为加密证明。可使用完整配置样例 `docker-compose.lucky.example.yml`，不要与默认 compose 的端口列表叠加；不要直接映射公网或局域网后端端口。Lucky 必须能访问该回环地址，若 Lucky 本身运行于容器的独立网络命名空间，则需先验证其网络方式，不能假设它能访问宿主机回环。必须使用与入口名称匹配、客户端可信的证书。Origin 与代理设置不正确会返回 403；凭据错误返回 401。环境变量和密码不可入 Git。

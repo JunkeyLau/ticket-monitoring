@@ -24954,6 +24954,10 @@ class _Srv(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
+_PROXY_AUTH_LOCK = threading.Lock()
+_PROXY_AUTH_FAILURES = []
+
+
 class _Handler(BaseHTTPRequestHandler):
     # HTTP/1.1 才走 keep-alive/条件请求：HTTP/1.0（默认）下 Chromium
     # 不缓存 /api/state，也不会发 If-None-Match，304 分支形同虚设
@@ -24961,6 +24965,78 @@ class _Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         pass
+
+    def _protected_origin(self):
+        """Origin is configured explicitly; the proxy must be the only entry."""
+        from urllib.parse import urlsplit
+        origin = os.environ.get('TM_PUBLIC_ORIGIN', '').strip()
+        mode = os.environ.get('TM_PROXY_PROTECTED', '')
+        if mode != '1':
+            # A partial proxy configuration must not silently disable protection.
+            return '' if origin or mode else None
+        if not origin:
+            return ''
+        try:
+            parsed = urlsplit(origin)
+            if parsed.port is not None and not 1 <= parsed.port <= 65535:
+                return ''
+        except ValueError:
+            return ''
+        if (parsed.scheme != 'https' or not parsed.hostname or parsed.username
+                or parsed.password or parsed.path or parsed.query or parsed.fragment):
+            return ''
+        return origin
+
+    def _access_guard(self, write=False):
+        origin = self._protected_origin()
+        if origin is None:
+            return True
+        from urllib.parse import urlsplit
+        import base64
+        import hmac
+        from binascii import Error as Base64Error
+        password = os.environ.get('TM_WEB_PASSWORD', '')
+        expected_host = urlsplit(origin).netloc if origin else ''
+        host = self.headers.get('Host', '')
+        forwarded = self.headers.get('X-Forwarded-Proto', '')
+        if not origin or host != expected_host or forwarded != 'https' or len(password) < 24:
+            self.close_connection = True
+            self._json({'ok': False, 'err': '受保护入口配置错误'}, 403)
+            return False
+        authorization = self.headers.get('Authorization', '')
+        try:
+            kind, encoded = authorization.split(' ', 1)
+            decoded = base64.b64decode(encoded, validate=True)
+            valid = kind.lower() == 'basic' and hmac.compare_digest(decoded, ('admin:' + password).encode())
+        except (ValueError, Base64Error, UnicodeError):
+            valid = False
+        now = time.monotonic()
+        with _PROXY_AUTH_LOCK:
+            _PROXY_AUTH_FAILURES[:] = [stamp for stamp in _PROXY_AUTH_FAILURES if now - stamp < 60]
+            blocked = len(_PROXY_AUTH_FAILURES) >= 5
+            if not blocked and not valid and authorization:
+                _PROXY_AUTH_FAILURES.append(now)
+        if blocked:
+            self.close_connection = True
+            self.send_response(429)
+            self.send_header('Retry-After', '60')
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return False
+        if not valid:
+            self.close_connection = True
+            self.send_response(401)
+            self.send_header('WWW-Authenticate', 'Basic realm="Ticket Monitor", charset="UTF-8"')
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return False
+        if write and self.headers.get('Origin', '') != origin:
+            self.close_connection = True
+            self._json({'ok': False, 'err': '跨站请求已拒绝'}, 403)
+            return False
+        return True
 
     def _json(self, obj, code=200):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
@@ -24995,6 +25071,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         """HEAD / 供 uptime/探活使用：只回头部，不构建响应体。"""
+        if not self._access_guard():
+            return
         if self.path == "/":
             body, etag, _gz = _page_snap(_State.version)
             self.send_response(200)
@@ -25008,6 +25086,21 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_error(405)
 
     def do_GET(self):
+        # A fixed, data-free liveness probe only for the container itself.
+        if self.path == '/healthz':
+            import ipaddress
+            try:
+                is_loopback = ipaddress.ip_address(self.client_address[0]).is_loopback
+            except ValueError:
+                is_loopback = False
+            if is_loopback:
+                self.send_response(200)
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+                return
+        if not self._access_guard():
+            return
         if self.path == "/":
             body, etag, gz = _page_snap(_State.version)
             # no-cache=每次导航必回源校验：升级重启后浏览器绝不拿旧
@@ -25726,6 +25819,8 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
+        if not self._access_guard(write=True):
+            return
         # HTTP/1.1 keep-alive：先把请求体整体读掉，再交给路由。演示只读
         # / 参数错误等早退分支若不读体，残留 JSON 会被当成下一请求行
         # （实测 501 Unsupported method '{"provider":...}GET'）。
@@ -26229,7 +26324,9 @@ class _Handler(BaseHTTPRequestHandler):
                     loopback = hostname == "localhost" or ipaddress.ip_address(hostname).is_loopback
                 except ValueError:
                     loopback = False
-                if (os.environ.get("TM_REMOTE_LOGIN") != "1" or not loopback
+                protected = self._protected_origin()
+                allowed_proxy = bool(protected and origin.geturl() == protected)
+                if (os.environ.get("TM_REMOTE_LOGIN") != "1" or not (loopback or allowed_proxy)
                         or origin.netloc != host or origin.scheme not in ("http", "https")
                         or self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json"):
                     self._json({"ok": False, "err": "远程登录仅限通过本机安全隧道使用"}, 403)

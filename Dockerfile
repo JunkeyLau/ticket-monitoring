@@ -25,6 +25,6 @@ ENV TM_WEB_HOST=0.0.0.0
 EXPOSE 8765
 
 HEALTHCHECK --interval=60s --timeout=10s --start-period=90s --retries=3 \
-    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/state', timeout=8)"]
+    CMD ["python", "-m", "core.healthcheck"]
 
 CMD ["python", "main.py"]

@@ -1,0 +1,21 @@
+# Copy this file to a local compose file and supply secrets outside Git.
+# Never publish the backend port on a LAN or public interface.
+services:
+  ticket-monitoring:
+    build: .
+    container_name: ticket-monitoring
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - ./data:/app/data
+      - ./user_data:/app/user_data
+      - ./logs:/app/logs
+      - ./debug:/app/debug
+    environment:
+      TM_PROXY_PROTECTED: "1"
+      TM_PUBLIC_ORIGIN: "${TM_PUBLIC_ORIGIN:?Set the exact HTTPS origin}"
+      TM_WEB_PASSWORD: "${TM_WEB_PASSWORD:?Set a random password of at least 24 characters}"
+      TM_REMOTE_LOGIN: "1"
+      TM_REMOTE_LOGIN_SECRET: "${TM_REMOTE_LOGIN_SECRET:?Set a separate random login password}"
+    restart: unless-stopped
