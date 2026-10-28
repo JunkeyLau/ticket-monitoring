@@ -456,7 +456,7 @@ class BaseCrawler:
         finally:
             self.use_mobile = bak
 
-    def _login_window(self, done_evt, idx: int = 0, timeout_s: float = 0):
+    def _login_window(self, done_evt, idx: int = 0, timeout_s: float = 0, remote=None):
         """并行登录窗口：开登录页保持打开，done_evt 置位后关闭。
         idx 用于阶梯排布窗口位置避免叠死；timeout_s=0 表示不超时
         （命令行 --login 由用户决定），Web 登录传 600 秒。"""
@@ -466,10 +466,15 @@ class BaseCrawler:
         if not self.login_mobile:
             self.use_mobile = False
         try:
-            with self.browser(headless=False, window_front=True,
+            with self.browser(headless=bool(remote), window_front=not bool(remote),
                               window_idx=idx, save_session="login") as ctx:
                 page = self.new_page(ctx)
                 page.goto(url, wait_until="domcontentloaded", timeout=40000)
+                if remote is not None:
+                    remote.serve(ctx, page, done_evt, timeout_s or 600)
+                    if not done_evt.is_set():
+                        raise RuntimeError("登录未确认")
+                    return
                 import time as _t
                 deadline = (_t.time() + timeout_s) if timeout_s else 0.0
                 while not done_evt.is_set():

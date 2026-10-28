@@ -13523,10 +13523,65 @@ async function loginVerify(slot,b){
  }catch(e){toast('核验请求失败','err');}
  if(b)b.classList.remove('busy');
 }
+let remoteLogin = null;
+function remoteAskSecret(){return new Promise(resolve=>{const el=document.createElement('div');
+ el.style.cssText='position:fixed;inset:0;z-index:99999;background:#000a;display:flex;align-items:center;justify-content:center';
+ el.innerHTML='<form style="background:white;color:black;padding:20px;border-radius:8px"><label>远程登录密码 <input type="password" autocomplete="off" required></label> <button type="submit">继续</button> <button type="button">取消</button></form>';
+ document.body.appendChild(el);const form=el.querySelector('form'),input=el.querySelector('input');input.focus();
+ form.onsubmit=e=>{e.preventDefault();const value=input.value;el.remove();resolve(value)};
+ el.querySelector('button[type=button]').onclick=()=>{el.remove();resolve(null)};
+});}
+async function remoteAction(action, payload){
+ if(!remoteLogin) throw Error('登录会话已结束');
+ const r=await fetch('/api/remote-login',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({action,slot:remoteLogin.slot,platform:remoteLogin.platform,token:remoteLogin.token,payload})});
+ const j=await r.json(); if(!j.ok)throw Error(j.err||'操作失败'); return j;
+}
+function remoteClose(){if(remoteLogin){remoteLogin=null;document.getElementById('remoteLoginDialog')?.remove();loadLogin(null,true);}}
+function remoteShow(platform,slot,token){
+ if(remoteLogin){toast('请先完成当前远程登录','err');return;}
+ remoteLogin={platform,slot,token};
+ const d=document.createElement('div');d.id='remoteLoginDialog';
+ d.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:12px';
+ d.innerHTML=`<div style="background:#fff;color:#111;padding:12px;max-width:1000px;width:100%;max-height:95vh;overflow:auto;border-radius:8px">
+ <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>远程渠道登录</b><span>点击画面操作；输入框用于发送文字</span>
+ <button id="remoteFinish">登录完成并保存</button><button id="remoteCancel">取消</button></div>
+ <img id="remoteFrame" alt="渠道登录画面加载中" style="display:block;width:100%;max-height:75vh;object-fit:contain;object-position:left top;cursor:pointer;margin-top:8px">
+ <input id="remoteText" type="password" autocomplete="off" placeholder="先点击画面中的输入框，再在此输入文字" style="width:100%;margin-top:8px;padding:8px">
+ <div id="remoteStatus" aria-live="polite"></div></div>`;
+ document.body.appendChild(d);const frame=d.querySelector('#remoteFrame'), input=d.querySelector('#remoteText'), status=d.querySelector('#remoteStatus');
+ let busy=false, alive=remoteLogin, inputQueue=Promise.resolve();
+ function sendInput(action,payload){inputQueue=inputQueue.then(()=>remoteAction(action,payload)).catch(err=>{status.textContent=err.message;});}
+ async function refresh(){if(remoteLogin!==alive)return;try{const j=await remoteAction('frame');
+   frame.src='data:image/jpeg;base64,'+j.image;frame.dataset.w=j.viewport.width;frame.dataset.h=j.viewport.height;status.textContent='';
+  }catch(e){status.textContent=e.message;} if(remoteLogin===alive)setTimeout(refresh,900);}
+ function remotePoint(e){const rect=frame.getBoundingClientRect(), w=+frame.dataset.w,h=+frame.dataset.h;
+  const scale=Math.min(rect.width/w,rect.height/h), x=(e.clientX-rect.left)/scale,y=(e.clientY-rect.top)/scale;
+  return (x>=0&&y>=0&&x<w&&y<h)?{x,y}:null;}
+ let dragging=false,lastMove=0;
+ frame.style.touchAction='none';
+ frame.onpointerdown=e=>{const point=remotePoint(e);if(!point)return;e.preventDefault();dragging=true;frame.setPointerCapture(e.pointerId);sendInput('down',point);};
+ frame.onpointermove=e=>{if(!dragging||Date.now()-lastMove<150)return;const point=remotePoint(e);if(point){lastMove=Date.now();sendInput('move',point);}};
+ frame.onpointerup=e=>{if(!dragging)return;dragging=false;const point=remotePoint(e);if(point)sendInput('up',point);input.focus();};
+ frame.onpointercancel=()=>{dragging=false;};
+ frame.onwheel=e=>{e.preventDefault();remoteAction('scroll',{delta:e.deltaY}).catch(err=>status.textContent=err.message);};
+ input.addEventListener('input',()=>{if(input.value){const text=input.value;input.value='';sendInput('text',{text});}});
+ input.addEventListener('keydown',e=>{if(['Enter','Tab','Backspace','Delete','Escape','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
+  e.preventDefault();sendInput('key',{key:e.key});}});
+ d.querySelector('#remoteFinish').onclick=async()=>{if(busy)return;busy=true;try{await inputQueue;await remoteAction('finish');remoteClose();toast('正在保存登录会话，请稍后刷新状态','ok');}catch(e){status.textContent=e.message;}busy=false;};
+ d.querySelector('#remoteCancel').onclick=async()=>{try{await remoteAction('cancel');}catch(e){}remoteClose();};refresh();
+}
 async function loginStart(p,b,slot){
  if(b&&b.classList.contains('busy'))return;   /* busy 守卫（同步双调曾 2 次 POST） */
  b.classList.add('busy');
  const key=slot||p;
+ if(remoteLogin){toast('请先完成当前远程登录','err');b.classList.remove('busy');return;}
+ try{const rr=await fetch('/api/remote-login',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'availability'})});
+  if(rr.status!==403){const avail=await rr.json();if(!avail.ok)throw Error(avail.err||'远程登录不可用');
+   const secret=await remoteAskSecret();if(secret===null){b.classList.remove('busy');return;}
+   const response=await fetch('/api/remote-login',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'start',platform:p,slot:key,secret})});
+   const remote=await response.json();if(remote.ok&&remote.remote_token)remoteShow(p,key,remote.remote_token);else toast(remote.err||'启动失败','err');b.classList.remove('busy');return;}
+ }catch(e){toast('远程登录请求失败','err');b.classList.remove('busy');return;}
  try{const r=await fetch('/api/login',{method:'POST',
   headers:{'Content-Type':'application/json'},
   body:JSON.stringify({platform:p,slot:key})});
@@ -20584,7 +20639,7 @@ def _login_state_view() -> dict:
     return {"ok": True, "plats": plats, "slots": slots}
 
 
-def _start_login(plat: str, slot: str = "") -> dict:
+def _start_login(plat: str, slot: str = "", remote_enabled: bool = False) -> dict:
     """网页登录：按登录槽位弹出有头浏览器窗口并保存独立会话。"""
     import time as _t
     key = str(slot or plat or "")
@@ -20604,6 +20659,9 @@ def _start_login(plat: str, slot: str = "") -> dict:
         evt = threading.Event()
         session = {"evt": evt, "done": threading.Event(), "saving": False,
                    "saved": False, "error": ""}
+        if remote_enabled:
+            from core.remote_login import RemoteLogin
+            session["remote"] = RemoteLogin()
         _State.login_errors.pop(key, None)
         _State.login_sessions[key] = session
     cfg = _effective_crawler_config()
@@ -20612,7 +20670,10 @@ def _start_login(plat: str, slot: str = "") -> dict:
     def _run():
         try:
             crawler = slot_crawler(key, cfg, logger)
-            crawler._login_window(evt, 0, timeout_s=600)
+            if remote_enabled:
+                crawler._login_window(evt, 0, timeout_s=600, remote=session["remote"])
+            else:
+                crawler._login_window(evt, 0, timeout_s=600)
             if not evt.is_set():
                 raise RuntimeError("登录窗口已关闭，尚未确认保存")
             session["saved"] = True
@@ -20641,6 +20702,8 @@ def _start_login(plat: str, slot: str = "") -> dict:
             _State.login_pending.pop(key, None)
             _State.logger.warning("[登录] %s 登录窗口异常: %s", key, e)
         finally:
+            if session.get("remote"):
+                session["remote"].close()
             with _State.lock:
                 if _State.login_sessions.get(key) is session:
                     _State.login_sessions.pop(key, None)
@@ -20648,7 +20711,10 @@ def _start_login(plat: str, slot: str = "") -> dict:
 
     threading.Thread(target=_run, daemon=True).start()
     _State.logger.info("[登录] 已弹出 %s 登录窗口", key)
-    return {"ok": True, "plat": meta["plat"], "slot": key}
+    result = {"ok": True, "plat": meta["plat"], "slot": key}
+    if remote_enabled:
+        result["remote_token"] = session["remote"].token
+    return result
 
 
 def _finish_login(plat: str, slot: str = "") -> dict:
@@ -24914,6 +24980,8 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("ETag", etag)
             self.send_header("Cache-Control", "no-cache")
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        if self.path == "/api/remote-login":
+            self.send_header("Cache-Control", "no-store")
         # 健康/脉冲/配置等 JSON 也有 50-100KB；大包按客户端能力 gzip
         if len(body) > 1024 and "gzip" in (
                 self.headers.get("Accept-Encoding") or ""):
@@ -25665,6 +25733,10 @@ class _Handler(BaseHTTPRequestHandler):
             _n = int(self.headers.get("Content-Length", 0) or 0)
         except (TypeError, ValueError):
             _n = 0
+        if self.path == "/api/remote-login" and (_n < 1 or _n > 4096):
+            self.close_connection = True
+            self._json({"ok": False, "err": "请求无效"}, 413)
+            return
         _raw = self.rfile.read(_n) if _n > 0 else b""
         _orig = self.rfile
         import io as _io
@@ -26144,6 +26216,65 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "err": str(e)}, 400)
             except Exception as e:
                 self._json({"ok": False, "err": str(e)[:200]}, 500)
+        elif self.path == "/api/remote-login":
+            # Opt-in only. The browser must access a loopback hostname through
+            # a private tunnel; host checks alone do not replace network binding.
+            try:
+                from urllib.parse import urlsplit
+                import ipaddress
+                origin = urlsplit(self.headers.get("Origin") or "")
+                host = self.headers.get("Host") or ""
+                hostname = urlsplit("http://" + host).hostname or ""
+                try:
+                    loopback = hostname == "localhost" or ipaddress.ip_address(hostname).is_loopback
+                except ValueError:
+                    loopback = False
+                if (os.environ.get("TM_REMOTE_LOGIN") != "1" or not loopback
+                        or origin.netloc != host or origin.scheme not in ("http", "https")
+                        or self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json"):
+                    self._json({"ok": False, "err": "远程登录仅限通过本机安全隧道使用"}, 403)
+                    return
+                length = int(self.headers.get("Content-Length", 0))
+                if length < 1 or length > 4096:
+                    self._json({"ok": False, "err": "请求无效"}, 400)
+                    return
+                body = json.loads(self.rfile.read(length))
+                if not isinstance(body, dict):
+                    raise ValueError("invalid request")
+                action, slot = body.get("action"), body.get("slot")
+                if action == "availability":
+                    self._json({"ok": True})
+                    return
+                if action == "start":
+                    import hmac
+                    secret = os.environ.get("TM_REMOTE_LOGIN_SECRET", "")
+                    supplied = body.get("secret")
+                    if (len(secret) < 16 or not isinstance(supplied, str)
+                            or not hmac.compare_digest(secret, supplied)):
+                        self._json({"ok": False, "err": "远程登录密码错误或尚未设置"}, 403)
+                        return
+                    self._json(_start_login(str(body.get("platform", "")), str(slot or ""), True))
+                    return
+                session = _State.login_sessions.get(str(slot or "")) or {}
+                bridge = session.get("remote")
+                token = body.get("token")
+                if bridge is None or not isinstance(token, str):
+                    raise PermissionError("登录会话已结束")
+                import hmac
+                if not hmac.compare_digest(bridge.token, token):
+                    raise PermissionError("登录会话无效")
+                if action == "finish":
+                    self._json(_finish_login(str(body.get("platform", "")), str(slot or "")))
+                elif action == "cancel":
+                    bridge.cancelled.set()
+                    self._json({"ok": True})
+                else:
+                    result = bridge.call(token, action, body.get("payload") or {})
+                    self._json(dict(ok=True, **result))
+            except (PermissionError, ValueError, TypeError):
+                self._json({"ok": False, "err": "登录请求无效或会话已结束"}, 403)
+            except Exception:
+                self._json({"ok": False, "err": "浏览器暂不可用，请重试"}, 503)
         elif self.path == "/api/login":
             try:
                 _ct = (self.headers.get("Content-Type") or "").lower()
@@ -26182,6 +26313,10 @@ class _Handler(BaseHTTPRequestHandler):
                     self._json({"ok": False, "err": "请求体过大"}, 413)
                     return
                 body = json.loads(self.rfile.read(length) or b"{}")
+                key = str(body.get("slot") or body.get("platform") or "")
+                if (_State.login_sessions.get(key) or {}).get("remote"):
+                    self._json({"ok": False, "err": "请在远程登录窗口中完成"}, 403)
+                    return
                 self._json(_finish_login(str(body.get("platform", "")),
                                          str(body.get("slot", ""))))
             except Exception as e:
