@@ -16,7 +16,17 @@ class RemoteLogin:
         self.token = secrets.token_urlsafe(32)
         self.requests = queue.Queue(maxsize=8)
         self.closed = threading.Event()
-        self.cancelled = threading.Event()
+        self._state_lock = threading.Lock()
+        self._state = "active"
+
+    def transition(self, state):
+        if state not in ('finish', 'cancel'):
+            raise ValueError('invalid transition')
+        with self._state_lock:
+            if self._state != 'active':
+                return False
+            self._state = state
+            return True
 
     def call(self, token, action, payload=None):
         if not isinstance(token, str) or not hmac.compare_digest(self.token, token):
@@ -37,9 +47,13 @@ class RemoteLogin:
 
     def serve(self, ctx, page, done, timeout=600):
         deadline = time.monotonic() + timeout
-        while not done.is_set():
-            if self.cancelled.is_set():
+        while True:
+            with self._state_lock:
+                state = self._state
+            if state == 'cancel':
                 raise RuntimeError("登录已取消")
+            if state == 'finish' and done.is_set():
+                return
             if time.monotonic() >= deadline:
                 raise RuntimeError('登录窗口超时，请重新打开')
             try:
@@ -59,8 +73,15 @@ class RemoteLogin:
                 page = pages[-1]
                 if action == 'frame':
                     img = page.screenshot(type='jpeg', quality=65, timeout=10000)
+                    from urllib.parse import urlsplit
+                    parsed = urlsplit(page.url)
+                    host = parsed.hostname or ''
+                    origin = (parsed.scheme + '://' + host) if host else parsed.scheme + ':'
+                    if parsed.port:
+                        origin += ':' + str(parsed.port)
                     result = {'image': base64.b64encode(img).decode('ascii'),
-                              'viewport': page.viewport_size}
+                              'viewport': page.viewport_size,
+                              'origin': origin[:300], 'secure': parsed.scheme == 'https'}
                 elif action in ('click', 'down', 'move', 'up'):
                     v = page.viewport_size
                     x, y = float(payload['x']), float(payload['y'])

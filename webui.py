@@ -13548,12 +13548,12 @@ function remoteShow(platform,slot,token){
  <button id="remoteFinish">登录完成并保存</button><button id="remoteCancel">取消</button></div>
  <img id="remoteFrame" alt="渠道登录画面加载中" style="display:block;width:100%;max-height:75vh;object-fit:contain;object-position:left top;cursor:pointer;margin-top:8px">
  <input id="remoteText" type="password" autocomplete="off" placeholder="先点击画面中的输入框，再在此输入文字" style="width:100%;margin-top:8px;padding:8px">
- <div id="remoteStatus" aria-live="polite"></div></div>`;
+ <div id="remoteOrigin" style="font-weight:bold;word-break:break-all"></div><div id="remoteStatus" aria-live="polite"></div></div>`;
  document.body.appendChild(d);const frame=d.querySelector('#remoteFrame'), input=d.querySelector('#remoteText'), status=d.querySelector('#remoteStatus');
  let busy=false, alive=remoteLogin, inputQueue=Promise.resolve();
  function sendInput(action,payload){inputQueue=inputQueue.then(()=>remoteAction(action,payload)).catch(err=>{status.textContent=err.message;});}
  async function refresh(){if(remoteLogin!==alive)return;try{const j=await remoteAction('frame');
-   frame.src='data:image/jpeg;base64,'+j.image;frame.dataset.w=j.viewport.width;frame.dataset.h=j.viewport.height;status.textContent='';
+   frame.src='data:image/jpeg;base64,'+j.image;frame.dataset.w=j.viewport.width;frame.dataset.h=j.viewport.height;d.querySelector('#remoteOrigin').textContent='当前站点：'+j.origin+(j.secure?'':' ⚠ 非 HTTPS，请勿输入敏感信息');status.textContent='';
   }catch(e){status.textContent=e.message;} if(remoteLogin===alive)setTimeout(refresh,900);}
  function remotePoint(e){const rect=frame.getBoundingClientRect(), w=+frame.dataset.w,h=+frame.dataset.h;
   const scale=Math.min(rect.width/w,rect.height/h), x=(e.clientX-rect.left)/scale,y=(e.clientY-rect.top)/scale;
@@ -13569,7 +13569,7 @@ function remoteShow(platform,slot,token){
  input.addEventListener('keydown',e=>{if(['Enter','Tab','Backspace','Delete','Escape','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
   e.preventDefault();sendInput('key',{key:e.key});}});
  d.querySelector('#remoteFinish').onclick=async()=>{if(busy)return;busy=true;try{await inputQueue;await remoteAction('finish');remoteClose();toast('正在保存登录会话，请稍后刷新状态','ok');}catch(e){status.textContent=e.message;}busy=false;};
- d.querySelector('#remoteCancel').onclick=async()=>{try{await remoteAction('cancel');}catch(e){}remoteClose();};refresh();
+ d.querySelector('#remoteCancel').onclick=async()=>{if(busy)return;busy=true;try{await remoteAction('cancel');remoteClose();}catch(e){status.textContent=e.message;}busy=false;};refresh();
 }
 async function loginStart(p,b,slot){
  if(b&&b.classList.contains('busy'))return;   /* busy 守卫（同步双调曾 2 次 POST） */
@@ -26264,9 +26264,14 @@ class _Handler(BaseHTTPRequestHandler):
                 if not hmac.compare_digest(bridge.token, token):
                     raise PermissionError("登录会话无效")
                 if action == "finish":
+                    if not bridge.transition("finish"):
+                        self._json({"ok": False, "err": "登录会话正在结束"}, 409)
+                        return
                     self._json(_finish_login(str(body.get("platform", "")), str(slot or "")))
                 elif action == "cancel":
-                    bridge.cancelled.set()
+                    if not bridge.transition("cancel"):
+                        self._json({"ok": False, "err": "登录会话正在结束"}, 409)
+                        return
                     self._json({"ok": True})
                 else:
                     result = bridge.call(token, action, body.get("payload") or {})

@@ -232,8 +232,7 @@ class TuniuCrawler(BaseCrawler):
         历史上只读 user_data/tuniu（base），用户重新登录后 base 没有
         tuniuuser_id/_taca，接口恒 710114，而 surfaces/h5 是登录态。
         """
-        base = os.path.join(self.user_data_root,
-                            self.profile_name or self.name)
+        base = super().user_data_dir
         surface = "h5" if self.use_mobile else "pc"
         path = os.path.join(base, "surfaces", surface)
         if os.path.isdir(os.path.join(path, "Default")):

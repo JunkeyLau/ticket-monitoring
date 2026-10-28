@@ -137,6 +137,16 @@ class BaseCrawler:
         # httpx 采集面统一走它，让出口 IP 可变（IP 级限流绕行）。注意
         # 国内站+境外出口=风控风险升档，建议国内直落节点或负载均衡组
         self.proxy: str = str(config.get("proxy", "") or "").strip()
+        # Restore an interrupted publish before HTTP-only crawlers read snapshots.
+        profile = os.path.join(self.user_data_root, self.profile_name or self.name)
+        if os.path.isdir(self.user_data_root):
+            with _PROFILE_LOCKS_GUARD:
+                lock = _PROFILE_LOCKS.setdefault(os.path.normcase(os.path.realpath(profile)), threading.RLock())
+            if lock.acquire(blocking=False):
+                try:
+                    self._recover_remote_profile()
+                finally:
+                    lock.release()
 
     # ---------- 浏览器 ----------
     @property
@@ -144,8 +154,13 @@ class BaseCrawler:
         # 不同平台/登录槽位不同目录，避免互相污染
         path = os.path.join(self.user_data_root,
                             self.profile_name or self.name)
-        os.makedirs(path, exist_ok=True)
-        return path
+        lock_path = os.path.normcase(os.path.realpath(path))
+        with _PROFILE_LOCKS_GUARD:
+            lock = _PROFILE_LOCKS.setdefault(lock_path, threading.RLock())
+        with lock:
+            self._recover_remote_profile()
+            os.makedirs(path, exist_ok=True)
+            return path
 
     @property
     def session_state_path(self) -> str:
@@ -232,13 +247,15 @@ class BaseCrawler:
                 window_front: bool = False, window_idx: int = 0,
                 save_session: Optional[str] = None):
         """启动持久化浏览器上下文。headless=None 时使用配置。"""
-        path = os.path.normcase(os.path.realpath(self.user_data_dir))
+        path = os.path.normcase(os.path.realpath(os.path.join(
+            self.user_data_root, self.profile_name or self.name)))
         with _PROFILE_LOCKS_GUARD:
-            lock = _PROFILE_LOCKS.setdefault(path, threading.Lock())
+            lock = _PROFILE_LOCKS.setdefault(path, threading.RLock())
         if not lock.acquire(blocking=False):
             raise SessionBusyError(
                 "[%s] 会话正在登录或采集，请完成当前操作后重试" % self.name)
         try:
+            self._recover_remote_profile()
             with self._browser_context(headless, window_front, window_idx,
                                        save_session) as ctx:
                 yield ctx
@@ -456,25 +473,107 @@ class BaseCrawler:
         finally:
             self.use_mobile = bak
 
+    def _recover_remote_profile(self):
+        """Restore the prior profile after interrupted publication, under its lock."""
+        import shutil
+        name = self.profile_name or self.name
+        root = self.user_data_root
+        target = os.path.join(root, name)
+        backup = os.path.join(root, '.remote-backup-' + name)
+        discard = os.path.join(root, '.remote-discard-' + name)
+        garbage = os.path.join(root, '.remote-garbage-' + name)
+        if os.path.isdir(backup):
+            if os.path.exists(target):
+                if os.path.isdir(discard):
+                    shutil.rmtree(discard)
+                os.replace(target, discard)
+            os.replace(backup, target)
+        if os.path.isdir(discard):
+            shutil.rmtree(discard)
+        if os.path.isdir(garbage):
+            shutil.rmtree(garbage, ignore_errors=True)
+        # Lock is shared by all users of this profile in this process. The
+        # application also enforces a single service instance per data root.
+        if os.path.isdir(root):
+            prefix = '.remote-session-' + name + '-'
+            for entry in os.scandir(root):
+                if entry.name.startswith(prefix) and entry.is_dir(follow_symlinks=False):
+                    shutil.rmtree(entry.path)
+
+    def _remote_login_window(self, done_evt, remote, timeout_s):
+        """Keep the live profile untouched unless a remote login is confirmed."""
+        import shutil
+        root = self.user_data_root
+        name = self.profile_name or self.name
+        os.makedirs(root, exist_ok=True)
+        target = os.path.join(root, name)
+        backup = os.path.join(root, '.remote-backup-' + name)
+        garbage = os.path.join(root, '.remote-garbage-' + name)
+        path = os.path.normcase(os.path.realpath(target))
+        with _PROFILE_LOCKS_GUARD:
+            lock = _PROFILE_LOCKS.setdefault(path, threading.RLock())
+        if not lock.acquire(blocking=False):
+            raise SessionBusyError('[%s] 会话正在登录或采集，请稍后重试' % self.name)
+        temp_root = None
+        old_mobile = self.use_mobile
+        try:
+            self._recover_remote_profile()
+            if os.path.exists(garbage):
+                raise RuntimeError('旧会话临时目录无法清理，未开始登录')
+            temp_root = tempfile.mkdtemp(prefix='.remote-session-' + name + '-', dir=root)
+            staged = os.path.join(temp_root, name)
+            if os.path.isdir(target):
+                shutil.copytree(target, staged, symlinks=True,
+                                ignore=shutil.ignore_patterns('Singleton*'))
+            self.user_data_root = temp_root
+            if not self.login_mobile:
+                self.use_mobile = False
+            with self.browser(headless=True, save_session='login') as ctx:
+                page = self.new_page(ctx)
+                page.goto(self.login_url(), wait_until='domcontentloaded', timeout=40000)
+                remote.serve(ctx, page, done_evt, timeout_s or 600)
+            # Chromium has closed and the new snapshot is durable. Keep a
+            # recoverable backup across the two directory renames.
+            if os.path.exists(target):
+                os.replace(target, backup)
+            try:
+                os.replace(staged, target)
+            except Exception:
+                if os.path.isdir(backup) and not os.path.exists(target):
+                    os.replace(backup, target)
+                raise
+            if os.path.isdir(backup):
+                try:
+                    # After this atomic rename, recovery must never restore the
+                    # old directory even if garbage deletion is interrupted.
+                    os.replace(backup, garbage)
+                except Exception:
+                    self._recover_remote_profile()
+                    raise
+                shutil.rmtree(garbage, ignore_errors=True)
+        finally:
+            self.user_data_root = root
+            self.use_mobile = old_mobile
+            if temp_root:
+                shutil.rmtree(temp_root, ignore_errors=True)
+            lock.release()
+
     def _login_window(self, done_evt, idx: int = 0, timeout_s: float = 0, remote=None):
         """并行登录窗口：开登录页保持打开，done_evt 置位后关闭。
         idx 用于阶梯排布窗口位置避免叠死；timeout_s=0 表示不超时
         （命令行 --login 由用户决定），Web 登录传 600 秒。"""
+        if remote is not None:
+            return self._remote_login_window(done_evt, remote, timeout_s)
         url = self.login_url()
         self.logger.info("[%s] 登录窗口已打开：%s", self.name, url)
         bak = self.use_mobile
         if not self.login_mobile:
             self.use_mobile = False
         try:
-            with self.browser(headless=bool(remote), window_front=not bool(remote),
+            with self.browser(headless=False, window_front=True,
                               window_idx=idx, save_session="login") as ctx:
                 page = self.new_page(ctx)
                 page.goto(url, wait_until="domcontentloaded", timeout=40000)
-                if remote is not None:
-                    remote.serve(ctx, page, done_evt, timeout_s or 600)
-                    if not done_evt.is_set():
-                        raise RuntimeError("登录未确认")
-                    return
                 import time as _t
                 deadline = (_t.time() + timeout_s) if timeout_s else 0.0
                 while not done_evt.is_set():
