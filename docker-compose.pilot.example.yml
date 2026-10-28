@@ -1,0 +1,19 @@
+# Pilot only: any device able to reach the HTTPS proxy has full control.
+services:
+  ticket-monitoring:
+    build: .
+    container_name: ticket-monitoring
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - ./data:/app/data
+      - ./user_data:/app/user_data
+      - ./logs:/app/logs
+      - ./debug:/app/debug
+    environment:
+      TM_PROXY_PROTECTED: "1"
+      TM_PUBLIC_ORIGIN: "${TM_PUBLIC_ORIGIN:?Set the exact HTTPS origin}"
+      TM_PILOT_OPEN: "1"
+      TM_REMOTE_LOGIN: "1"
+    restart: unless-stopped

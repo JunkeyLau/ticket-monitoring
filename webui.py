@@ -13578,7 +13578,7 @@ async function loginStart(p,b,slot){
  if(remoteLogin){toast('请先完成当前远程登录','err');b.classList.remove('busy');return;}
  try{const rr=await fetch('/api/remote-login',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'availability'})});
   if(rr.status!==403){const avail=await rr.json();if(!avail.ok)throw Error(avail.err||'远程登录不可用');
-   const secret=await remoteAskSecret();if(secret===null){b.classList.remove('busy');return;}
+   const secret=avail.pilot?'':await remoteAskSecret();if(secret===null){b.classList.remove('busy');return;}
    const response=await fetch('/api/remote-login',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'start',platform:p,slot:key,secret})});
    const remote=await response.json();if(remote.ok&&remote.remote_token)remoteShow(p,key,remote.remote_token);else toast(remote.err||'启动失败','err');b.classList.remove('busy');return;}
  }catch(e){toast('远程登录请求失败','err');b.classList.remove('busy');return;}
@@ -24973,7 +24973,7 @@ class _Handler(BaseHTTPRequestHandler):
         mode = os.environ.get('TM_PROXY_PROTECTED', '')
         if mode != '1':
             # A partial proxy configuration must not silently disable protection.
-            return '' if origin or mode else None
+            return '' if origin or mode or os.environ.get('TM_PILOT_OPEN') else None
         if not origin:
             return ''
         try:
@@ -24999,10 +24999,17 @@ class _Handler(BaseHTTPRequestHandler):
         expected_host = urlsplit(origin).netloc if origin else ''
         host = self.headers.get('Host', '')
         forwarded = self.headers.get('X-Forwarded-Proto', '')
-        if not origin or host != expected_host or forwarded != 'https' or len(password) < 24:
+        pilot = os.environ.get('TM_PILOT_OPEN') == '1'
+        if not origin or host != expected_host or forwarded != 'https' or (not pilot and len(password) < 24):
             self.close_connection = True
             self._json({'ok': False, 'err': '受保护入口配置错误'}, 403)
             return False
+        if pilot:
+            if write and self.headers.get('Origin', '') != origin:
+                self.close_connection = True
+                self._json({'ok': False, 'err': '跨站请求已拒绝'}, 403)
+                return False
+            return True
         authorization = self.headers.get('Authorization', '')
         try:
             kind, encoded = authorization.split(' ', 1)
@@ -26339,14 +26346,15 @@ class _Handler(BaseHTTPRequestHandler):
                 if not isinstance(body, dict):
                     raise ValueError("invalid request")
                 action, slot = body.get("action"), body.get("slot")
+                pilot = os.environ.get("TM_PILOT_OPEN") == "1" and bool(self._protected_origin())
                 if action == "availability":
-                    self._json({"ok": True})
+                    self._json({"ok": True, "pilot": pilot})
                     return
                 if action == "start":
                     import hmac
                     secret = os.environ.get("TM_REMOTE_LOGIN_SECRET", "")
                     supplied = body.get("secret")
-                    if (len(secret) < 16 or not isinstance(supplied, str)
+                    if not pilot and (len(secret) < 16 or not isinstance(supplied, str)
                             or not hmac.compare_digest(secret, supplied)):
                         self._json({"ok": False, "err": "远程登录密码错误或尚未设置"}, 403)
                         return

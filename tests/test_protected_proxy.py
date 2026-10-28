@@ -109,3 +109,63 @@ def test_docker_context_excludes_local_secret_files():
     assert '.env' in lines and '.env.*' in lines and '.session-secret' in lines
     assert 'docker-compose*.yml' in lines and 'compose*.yaml' in lines
     assert '.env.*' in (root / '.gitignore').read_text().splitlines()
+
+
+def test_explicit_pilot_requires_exact_https_origin_but_no_password(server, monkeypatch):
+    import webui
+    monkeypatch.setenv('TM_PILOT_OPEN', '1')
+    monkeypatch.delenv('TM_WEB_PASSWORD')
+    monkeypatch.delenv('TM_REMOTE_LOGIN_SECRET', raising=False)
+    calls = []
+    monkeypatch.setattr(webui, '_start_login', lambda *args: calls.append(args) or {'ok': True})
+    assert req(server, path='/no-such-page', auth=False) == 404
+    assert req(server, method='POST', path='/api/remote-login', auth=False,
+               body={'action': 'availability'}) == 200
+    assert req(server, method='POST', path='/api/remote-login', auth=False,
+               body={'action': 'start', 'slot': 'ctrip', 'platform': 'ctrip'}) == 200
+    assert calls == [('ctrip', 'ctrip', True)]
+    assert req(server, method='POST', path='/api/remote-login', auth=False,
+               origin='https://evil.example', body={'action': 'start'}) == 403
+    assert req(server, path='/no-such-page', auth=False, proto='http') == 403
+    monkeypatch.delenv('TM_PROXY_PROTECTED')
+    assert req(server, path='/no-such-page', auth=False) == 403
+
+
+def test_pilot_start_token_and_cancel(server, monkeypatch):
+    import webui
+    from core.remote_login import RemoteLogin
+    monkeypatch.setenv('TM_PILOT_OPEN', '1')
+    monkeypatch.delenv('TM_WEB_PASSWORD')
+    monkeypatch.delenv('TM_REMOTE_LOGIN_SECRET', raising=False)
+    bridge = RemoteLogin()
+    monkeypatch.setitem(webui._State.login_sessions, 'ctrip', {'remote': bridge})
+    monkeypatch.setattr(webui, '_start_login', lambda *args: {'ok': True, 'remote_token': bridge.token})
+    port = server.server_address[1]
+    def post(body):
+        con = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+        con.request('POST', '/api/remote-login', json.dumps(body),
+                    {'Host': 'tickets.example.test', 'X-Forwarded-Proto': 'https',
+                     'Origin': 'https://tickets.example.test', 'Content-Type': 'application/json'})
+        res = con.getresponse()
+        status, payload = res.status, json.loads(res.read())
+        con.close()
+        return status, payload
+    assert post({'action': 'availability'}) == (200, {'ok': True, 'pilot': True})
+    status, started = post({'action': 'start', 'platform': 'ctrip', 'slot': 'ctrip'})
+    assert status == 200 and started['remote_token'] == bridge.token
+    assert post({'action': 'cancel', 'slot': 'ctrip', 'token': 'invalid'})[0] == 403
+    assert post({'action': 'cancel', 'slot': 'ctrip', 'token': bridge.token}) == (200, {'ok': True})
+    assert bridge.transition('finish') is False
+    assert req(server, method='POST', path='/api/config', auth=False,
+               origin='https://evil.example', body={}) == 403
+
+
+def test_protected_mode_still_requires_remote_login_secret(server, monkeypatch):
+    import webui
+    monkeypatch.delenv('TM_PILOT_OPEN', raising=False)
+    monkeypatch.delenv('TM_REMOTE_LOGIN_SECRET', raising=False)
+    calls = []
+    monkeypatch.setattr(webui, '_start_login', lambda *args: calls.append(args) or {'ok': True})
+    assert req(server, method='POST', path='/api/remote-login',
+               body={'action': 'start', 'slot': 'ctrip', 'platform': 'ctrip'}) == 403
+    assert not calls

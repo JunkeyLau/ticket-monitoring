@@ -448,3 +448,9 @@ Apache-2.0（见 [LICENSE](LICENSE)）。请遵守各平台服务条款；商用
 启用 `TM_PROXY_PROTECTED=1`、`TM_PUBLIC_ORIGIN` 与随机 `TM_WEB_PASSWORD`（至少 24 字符）后，整个控制台及 API 均要求 HTTP Basic 认证，用户名为 `admin`。Origin 必须是确切的 HTTPS 入口，例如 `https://ticket.example.com`，不要加路径或末尾斜杠。所有 POST 必须携带与该入口完全一致的 Origin；代理必须保留浏览器的 Host（包括非默认端口）并设置 `X-Forwarded-Proto: https`。远程登录仍需独立设置 `TM_REMOTE_LOGIN=1` 和 `TM_REMOTE_LOGIN_SECRET`。
 
 后端端口必须仅绑定 NAS 回环地址，确保代理是唯一入口，且仅在可信网络使用；容器内部仍监听容器网络，需隔离不可信的其他容器；切勿将 `X-Forwarded-Proto` 视为加密证明。可使用完整配置样例 `docker-compose.lucky.example.yml`，不要与默认 compose 的端口列表叠加；不要直接映射公网或局域网后端端口。Lucky 必须能访问该回环地址，若 Lucky 本身运行于容器的独立网络命名空间，则需先验证其网络方式，不能假设它能访问宿主机回环。必须使用与入口名称匹配、客户端可信的证书。Origin 与代理设置不正确会返回 403；凭据错误返回 401。环境变量和密码不可入 Git。
+
+### 局域网无密码 Pilot
+
+`docker-compose.pilot.example.yml` 是 Owner 主动选择的无密码试用模式，只需要设置 `TM_PUBLIC_ORIGIN`。Lucky 仅允许可信局域网访问、使用可信 HTTPS 证书并转发原始 Host 与 `X-Forwarded-Proto: https`；容器端口仍只绑定 NAS 回环地址，不要开放公网映射。确保其他容器无法访问后端容器网络，同一份 `user_data` 只能由一个实例使用。
+
+**无密码模式下任何可到达该入口的设备都能查看和修改整个控制台，并操作渠道登录会话。** HTTPS 只保护传输，Host/Origin 检查不是用户认证；远程登录中的临时令牌也不能鉴别访问者。确认 Lucky 入口没有通过路由器、IPv6 或其他路径暴露公网。试用结束应关闭此模式并改用受保护配置。
