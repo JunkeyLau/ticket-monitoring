@@ -9896,14 +9896,15 @@ function followRenderDetail(item){
   let tries=0;(function set(){if(typeof wsWatchById==='function'&&wsWatchById(item.id)){wsSetFocus(item.id);document.querySelectorAll('#wsRanges button').forEach(b=>b.classList.toggle('on',+b.dataset.wsrange===WS.range));return}if(tries++<30)setTimeout(set,120)})();
  }
 }
+function followRouteIsRoundTrip(r){return !!((Array.isArray(r&&r.ret_dates)?r.ret_dates.length:r&&r.ret_dates)||String(r&&r.ret_date||'').trim())}
 function followConfigRoute(item){
  const user=(S&&S.users&&S.users[U])||{},cfgUser=(CFG||[]).find(x=>x.name===user.name);
  if(!cfgUser)return null;
  const row=(item&&item.route)||{},routes=cfgUser.routes||[],date=String(row.date||''),sourceIndex=Number(row.config_index),matches=routes.map((r,index)=>({r,index})).filter(x=>x.index===sourceIndex&&x.r.enabled!==false&&x.r.from===row.from&&x.r.to===row.to&&(x.r.dates||[]).includes(date));
  if(matches.length!==1)return null;
  const {r,index}=matches[0];
- if(Boolean(r.ret_dates!=null||String(r.ret_date||'').trim())!==Boolean(row.config_round_trip))return null;
- if(r.ret_dates!=null||String(r.ret_date||'').trim())return null;
+ if(followRouteIsRoundTrip(r)!==Boolean(row.config_round_trip))return null;
+ if(followRouteIsRoundTrip(r))return null;
  return {index,route:r,user:cfgUser,ui:(CFG||[]).indexOf(cfgUser)};
 }
 function followEditRoute(){switchView('cfg');showCfgPanel('users');toast('已打开航线条件配置；修改会沿用配置自动保存与版本冲突处理','')}
@@ -23854,9 +23855,13 @@ def _user_state(u):
             continue
         _route = _route_view(_raw_route)
         _route["config_index"] = _config_index
+        def _route_field(name, default=None):
+            if isinstance(_raw_route, dict):
+                return _raw_route.get(name, default)
+            return getattr(_raw_route, name, default)
         _route["config_round_trip"] = bool(
-            _raw_route.get("ret_dates") is not None
-            or str(_raw_route.get("ret_date") or "").strip())
+            _route_field("ret_dates")
+            or str(_route_field("ret_date") or "").strip())
         routes.append(_route)
     # 出发时段约束（与告警链路同一套窗口；按 航线+日期 粒度，
     # 同航线不同日期可有不同窗口，如返程 10-4 仅晚间 / 10-5 全天）

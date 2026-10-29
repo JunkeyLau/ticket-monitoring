@@ -2,6 +2,10 @@
 """r360: watches move into one route/flight list with one add flow."""
 import os
 
+import webui
+from core.models import Route
+from core.storage import PriceStorage
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(os.path.join(ROOT, "webui.py"), encoding="utf-8").read()
 
@@ -63,13 +67,32 @@ def test_route_selection_and_target_edit_are_stable_and_unambiguous():
                 SRC.index("function followEditRoute()")]
     assert "x.index===sourceIndex&&x.r.enabled!==false&&x.r.from===row.from" in match
     assert "if(matches.length!==1)return null" in match
-    assert "Boolean(r.ret_dates!=null||String(r.ret_date||'').trim())!==Boolean(row.config_round_trip)" in match
-    assert "if(r.ret_dates!=null||String(r.ret_date||'').trim())return null" in match
+    assert "followRouteIsRoundTrip(r)!==Boolean(row.config_round_trip)" in match
+    assert "if(followRouteIsRoundTrip(r))return null" in match
     state = SRC[SRC.index("def _user_state(u):"):SRC.index("\ndef _state_cache_path", SRC.index("def _user_state(u):"))]
     assert '_route["config_index"] = _config_index' in state
     assert '"config_round_trip": r.get("config_round_trip", False)' in state
     assert "routes_arr = []" in state
     assert "seen_rd" not in state
+
+
+def test_user_state_keeps_config_identity_for_route_objects_and_dicts(tmp_path):
+    dbp = str(tmp_path / "follow-state.db")
+    PriceStorage(dbp)
+    old_cfg = webui._State.cfg
+    webui._State.cfg = {"output": {"db_path": dbp}}
+    routes = [
+        Route("SHA", "上海", "JFK", "纽约", ["2026-12-17"]),
+        {"from": "SHA", "from_name": "上海", "to": "JFK",
+         "to_name": "纽约", "dates": ["2026-12-17"], "ret_dates": ["2027-01-01"]},
+    ]
+    try:
+        state = webui._user_state({"name": "follow", "routes": routes})
+    finally:
+        webui._State.cfg = old_cfg
+    rows = state["routesArr"]
+    assert [r["config_index"] for r in rows] == [0, 1]
+    assert [r["config_round_trip"] for r in rows] == [False, True]
 
 
 def test_config_read_retry_is_single_flight_and_rate_limited():
