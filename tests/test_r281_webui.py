@@ -207,24 +207,34 @@ def test_channel_lamp_rejects_http_and_malformed_source_responses(srv):
 
 
 def test_channel_lamp_clears_stale_collection_failure_on_empty_pulse(srv):
-    """有效空轮次代表没有当前失败，不能让已清空的旧采集红灯常驻。"""
+    """真实 pulse 200/304 轮询在无用户时也要清掉旧采集失败。"""
     _, shared_page = srv
     page = shared_page.context.browser.new_page()
     page.goto(shared_page.url, wait_until="networkidle")
-    result = page.evaluate("""()=>{
+    result = page.evaluate("""async()=>{
       const plats=Object.fromEntries(
         ['qunar','ctrip','fliggy','tongcheng','tuniu']
           .map(p=>[p,{status:'available'}]));
+      S={...S,users:[],demo:false};
       S.demo=false;
       CHANNEL_STATE={payload:{ok:true,plats},error:'',request:0,
         at:Date.now(),pending:null};
       window._channelHealthReady=true;window._channelPulseReady=true;
       window._channelHealthError=false;window._channelPulseError=false;
       window._channelHealthHasRounds=true;window._channelPulseHasRounds=true;
-      window._ovPushStreak=0;renderPulseAlert(2);
+      window._ovPushStreak=0;window._ovCollectFails=2;
+      PU=null;PU_CACHE=null;PU_ETAG='';
       const hadFailure=channelLamp.classList.contains('bad');
-      renderPulse({ok:true,rounds:[]});
-      const out={hadFailure,cleared:window._ovCollectFails===0,
+      const oldFetch=window.fetch;
+      window.fetch=async()=>new Response(JSON.stringify({ok:true,rounds:[]}),
+        {status:200,headers:{'Content-Type':'application/json','ETag':'empty'}});
+      await pulse();
+      const cleared200=window._ovCollectFails===0;
+      window._ovCollectFails=2;renderChannelLamp();
+      window.fetch=async()=>new Response(null,{status:304});
+      await pulse();
+      window.fetch=oldFetch;
+      const out={hadFailure,cleared200,cleared304:window._ovCollectFails===0,
         noStaleBad:!channelLamp.classList.contains('bad'),
         noScan:channelLamp.classList.contains('warn'),
         fails:window._ovCollectFails,push:window._ovPushStreak,
@@ -233,7 +243,7 @@ def test_channel_lamp_clears_stale_collection_failure_on_empty_pulse(srv):
     }""")
     page.close()
     assert all(result[k] == v for k, v in {
-        "hadFailure": True, "cleared": True,
+        "hadFailure": True, "cleared200": True, "cleared304": True,
         "noStaleBad": True, "noScan": True,
         "fails": 0, "push": 0, "classes": "channel-lamp warn",
         "pulseRounds": False,

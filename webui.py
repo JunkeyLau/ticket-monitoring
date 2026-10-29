@@ -11666,6 +11666,7 @@ function renderChannelLamp(){
  if(readErr){tone='bad';label='读取失败';detail='渠道状态读取失败；稍后自动重试'}
  else if(fails||need.length||authBad.length){tone='bad';label=need.length?'需处理':'有异常';detail=need.length
    ?'以下渠道需要重新登录：'+need.map(p=>(LOGIN_CN&&LOGIN_CN[p])||p).join('、')
+   :authBad.length?'渠道登录状态存在异常；点击查看渠道健康'
    :'采集失败或推送通道连败；点击查看渠道健康'}
  else if((S&&S.demo)||(payload&&payload.demo)){
   tone='demo';label='演示';detail='演示数据不代表真实渠道登录或采集状态'}
@@ -11892,15 +11893,16 @@ async function showLog(el){let p=null,ts=null;if(el&&el.dataset){p=el.dataset.p;
 /* ===== 运行脉冲：/api/pulse（每轮每渠道行数/耗时，签派台脉搏） ===== */
 let PU=null,PU_ETAG='',PU_CACHE=null;
 const PCN={'qunar':'去哪儿','fliggy':'飞猪','ctrip':'携程','tongcheng':'同程','tuniu':'途牛'};
-function acceptPulse304(){const raw=PU_CACHE||PU;if(!raw)throw new Error('扫描状态无缓存');const j=JSON.parse(raw);if(!j||j.ok!==true||!Array.isArray(j.rounds))throw new Error('扫描缓存响应异常');window._channelPulseReady=true;window._channelPulseHasRounds=j.rounds.length>0;window._channelPulseError=false;if(S&&S.users&&S.users.length&&PU!==raw){PU=raw;renderPulse(j);}renderChannelLamp();}
-async function pulse(){/* 有则显示 */try{const r=await fetch('/api/pulse',{headers:PU_ETAG?{'If-None-Match':PU_ETAG}:{}});if(r.status===304){acceptPulse304();return;}if(!r.ok)throw Error('HTTP '+r.status);const _et=r.headers.get('ETag'),t=await r.text(),j=JSON.parse(t);if(!j||j.ok!==true||!Array.isArray(j.rounds))throw Error('扫描状态响应异常');window._channelPulseReady=true;window._channelPulseHasRounds=j.rounds.length>0;window._channelPulseError=false;PU_CACHE=t;if(_et)PU_ETAG=_et;
+function syncPulseStatus(j){const rs=(j&&Array.isArray(j.rounds))?j.rounds:[];window._channelPulseHasRounds=rs.length>0;window._ovCollectFails=rs.length?Number(rs[rs.length-1].fails||0):0;renderChannelLamp();return rs;}
+function acceptPulse304(){const raw=PU_CACHE||PU;if(!raw)throw new Error('扫描状态无缓存');const j=JSON.parse(raw);if(!j||j.ok!==true||!Array.isArray(j.rounds))throw new Error('扫描缓存响应异常');window._channelPulseReady=true;window._channelPulseError=false;syncPulseStatus(j);if(S&&S.users&&S.users.length&&PU!==raw){PU=raw;renderPulse(j);}}
+async function pulse(){/* 有则显示 */try{const r=await fetch('/api/pulse',{headers:PU_ETAG?{'If-None-Match':PU_ETAG}:{}});if(r.status===304){acceptPulse304();return;}if(!r.ok)throw Error('HTTP '+r.status);const _et=r.headers.get('ETag'),t=await r.text(),j=JSON.parse(t);if(!j||j.ok!==true||!Array.isArray(j.rounds))throw Error('扫描状态响应异常');window._channelPulseReady=true;window._channelPulseError=false;PU_CACHE=t;if(_et)PU_ETAG=_et;syncPulseStatus(j);
  /* 空守卫先于签名记账：无用户不写 PU，避免 state 恢复拍同文本早退。 */
  renderChannelLamp();if(!(S&&S.users&&S.users.length))return;if(t===PU)return;PU=t;renderPulse(j);renderChannelLamp();
 }catch(e){PU_ETAG='';window._channelPulseError=true;renderChannelLamp();/* 失败拍作废 ETag；pulse 属「有则显示」，失败保持静默不制造假等待 */}}
 /* pulse 的失败保持静默不制造假等待；异常由全局渠道状态灯汇总。 */
 /* 采集和推送两个轮询独立写入来源计数，再合成同一个全局渠道灯。 */
 function renderPulseAlert(fails){window._ovCollectFails=fails||0;renderChannelLamp();}
-function renderPulse(j){const rs=(j&&Array.isArray(j.rounds))?j.rounds:[];window._channelPulseHasRounds=rs.length>0;if(!rs.length){renderPulseAlert(0);return;}if(!(S&&S.users&&S.users.length)){renderPulseAlert(0);return;}/* 空配置守卫：删光用户后 10s 轮询不得复明 pulsecard（P2-4 回收的另一半——render 分支只封一拍，轮询每拍都会再点亮） */
+function renderPulse(j){const rs=syncPulseStatus(j);if(!rs.length){renderPulseAlert(0);return;}if(!(S&&S.users&&S.users.length)){renderPulseAlert(0);return;}/* 空配置守卫：删光用户后 10s 轮询不得复明 pulsecard（P2-4 回收的另一半——render 分支只封一拍，轮询每拍都会再点亮） */
  $('pulsecard').style.display='';
  const last=rs[rs.length-1];
  const chans={};let runs=0,oks=0,latSum=0,latN=0,failRounds=0;
