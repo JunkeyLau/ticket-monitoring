@@ -6862,7 +6862,7 @@ def main():
                   &&current.r.from===best.route.from
                   &&current.r.to===best.route.to
                   &&current.r.date===best.route.date;
-              return {selected,
+              return {id:best.id,selected,
                 visible:visible(root),chart:visible(chart),
                 plot:visible(canvas)&&canvas.clientWidth>0&&canvas.clientHeight>0,
                 flights:visible(detail),row:visible(row),rows:n,
@@ -6879,6 +6879,38 @@ def main():
                and _route_detail["chart"] and _route_detail["plot"]
                and _route_detail["flights"] and _route_detail["row"]
                and _route_detail["scoped"], str(_route_detail))
+            # 模拟关注列表轮询刷新：列表重绘后，已选航线的走势图与当日明细仍须可见。
+            pg.evaluate("""()=>{FOLLOW_RENDERED='';followRenderList()}""")
+            pg.wait_for_timeout(250)
+            _route_refresh = pg.evaluate("""id=>{
+              const item=followItems().find(x=>x.kind==='route'&&x.id===id),
+                root=document.getElementById('followRouteDetail'),
+                chart=document.querySelector('#followRouteChartHost #chartcard'),
+                canvas=document.querySelector('#followRouteChartHost #chart'),
+                detail=document.querySelector('#followRouteFlightsHost #montab-details'),
+                row=document.querySelector('#followRouteFlightsHost #ftable tbody tr[data-k]'),
+                current=curRoute(),scope=FOLLOW_SCOPE;
+              const visible=e=>!!e&&!e.hidden&&e.getClientRects().length>0
+                &&getComputedStyle(e).visibility!=='hidden';
+              const rows=filteredRows();
+              return {selected:!!item&&FOLLOW_SELECTION==='route:'+id
+                  &&current.r&&current.r.from===item.route.from
+                  &&current.r.to===item.route.to
+                  &&current.r.date===item.route.date,
+                visible:visible(root),chart:visible(chart),
+                plot:visible(canvas)&&canvas.clientWidth>0&&canvas.clientHeight>0,
+                flights:visible(detail),row:visible(row),
+                scoped:!!scope&&rows.length>0
+                  &&rows.every(f=>f.route===scope.route
+                    &&(!scope.date||f.date===scope.date)),
+                id:id,selection:FOLLOW_SELECTION,
+                route:current.r&&[current.r.from,current.r.to,current.r.date],
+                rows:rows.length};}""", _route_detail["id"])
+            ck("goal 航线详情轮询重绘后仍保持可见",
+               _route_refresh["selected"] and _route_refresh["visible"]
+               and _route_refresh["chart"] and _route_refresh["plot"]
+               and _route_refresh["flights"] and _route_refresh["row"]
+               and _route_refresh["scoped"], str(_route_refresh))
             pg.evaluate("""()=>{const id=document.querySelector(
               '#followRows [data-follow-kind=watch]')?.dataset.followId;
               if(id)followSelect('watch',id)}""")
