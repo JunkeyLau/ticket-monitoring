@@ -373,11 +373,16 @@ def test_add_watch_opens_linear_four_step_wizard_and_intl_deadline_defaults_unli
       const disabledChange=cfgWizardStageRoutes(disabled,draft,'');
       const overlap={routes:[{from:'SHA',to:'JFK',dates:['2026-12-17'],alert_direct:1000,alert_transfer:1000}]};
       const overlapChange=cfgWizardStageRoutes(overlap,draft,'');
+      const mixed={routes:[
+        {from:'SHA',to:'JFK',dates:['2026-12-17'],alert_direct:500,alert_transfer:500,transfer_arrival_max:'不限'},
+        {from:'SHA',to:'JFK',dates:['2026-12-17'],alert_direct:1000,alert_transfer:1000}]};
+      const mixedBefore=JSON.stringify(mixed.routes),mixedChange=cfgWizardStageRoutes(mixed,draft,'');
       return {fresh:freshSnapshot,added:added.added.length,restoredFresh:fresh.routes.length===0,
         merged:JSON.stringify(merged.routes),mergedCount:changes.merged.length,addedCount:changes.added.length,
         incompatible:{dates:incompatible.routes[0].dates,added:incompatibleChange.added.length},
         disabled:{enabled:disabled.routes[0].enabled,added:disabledChange.added.length},
-        overlap:{date:overlap.routes[0].dates[0],added:overlapChange.added.length,conflicts:overlapChange.conflicts.length}};
+        overlap:{date:overlap.routes[0].dates[0],added:overlapChange.added.length,conflicts:overlapChange.conflicts.length},
+        mixed:{added:mixedChange.added.length,merged:mixedChange.merged.length,conflicts:mixedChange.conflicts.length,unchanged:mixedBefore===JSON.stringify(mixed.routes)}};
     }""")
     fresh_routes = __import__('json').loads(staged['fresh'])
     assert staged['added'] == 2
@@ -396,6 +401,7 @@ def test_add_watch_opens_linear_four_step_wizard_and_intl_deadline_defaults_unli
     assert staged['incompatible'] == {'dates':['2026-12-01'],'added':1}
     assert staged['disabled'] == {'enabled':False,'added':1}
     assert staged['overlap'] == {'date':'2026-12-17','added':0,'conflicts':1}
+    assert staged['mixed'] == {'added':0,'merged':0,'conflicts':1,'unchanged':True}
     concurrent = page.evaluate("""async() => {
       const user=CFG.find(u=>u.name===cfgWatchName());
       const route={from:'SHA',to:'JFK',dates:['2026-12-01'],alert_direct:500,alert_transfer:500,transfer_arrival_max:'不限',transfer_layover_min:0,min_baggage:0,no_cross:false};
@@ -467,3 +473,52 @@ def test_add_watch_opens_linear_four_step_wizard_and_intl_deadline_defaults_unli
     assert retry['once'] == retry['before']
     assert retry['twice'] == retry['before']
     assert retry['open'] and retry['dates'] == ['2026-12-17']
+
+
+def test_add_watch_success_rebases_same_day_concurrent_filter_edit(page):
+    _open_cfg(page)
+    page.evaluate("showCfgPanel('watch')")
+    result = page.evaluate("""async() => {
+      const user=CFG.find(u=>u.name===cfgWatchName());
+      const route={from:'SHA',to:'JFK',dates:['2026-12-17','2026-12-18'],
+        alert_direct:500,alert_transfer:500,transfer_arrival_max:'不限',
+        transfer_layover_min:0,min_baggage:0,no_cross:false};
+      user.routes.push(route);
+      Object.assign(CFG_WIZ,{open:true,step:4,from:'SHA',to:'JFK',fromName:'上海',toName:'纽约',
+        dates:['2026-12-17'],returnDate:'',rows:[],selected:'',target:'500',strong:true});
+      cfgWatchRender();
+      let finish;const savedFetch=window.fetch;
+      window.fetch=async(url,options)=>String(url)==='/api/config'
+        ?new Promise(resolve=>{finish=resolve})
+        :{ok:true,status:200,json:async()=>({ok:true,watches:[]})};
+      const saving=cfgWizardSave();await new Promise(resolve=>setTimeout(resolve,0));
+      route.alert_direct=1000;route.alert_transfer=1000;
+      finish({ok:true,status:200,json:async()=>({ok:true,revision:'committed'})});
+      await saving;window.fetch=savedFetch;
+      const relevant=user.routes.filter(r=>r.from==='SHA'&&r.to==='JFK').map(r=>({dates:r.dates.slice(),target:r.alert_direct}));
+      return {relevant,clean:JSON.parse(CFG_CLEAN).find(u=>u.name===user.name).routes,
+        dirty:cfgCoreDirty(),notice:[...document.querySelectorAll('.toast,.toast-item')].map(e=>e.textContent).join(' ')};
+    }""")
+    routes = result['relevant']
+    assert {'dates':['2026-12-18'],'target':1000} in routes
+    assert {'dates':['2026-12-17'],'target':500} in routes
+    clean_routes = [r for r in result['clean'] if r.get('from') == 'SHA' and r.get('to') == 'JFK']
+    assert any('2026-12-17' in r.get('dates', []) and r.get('alert_direct') == 500 for r in clean_routes)
+    assert result['dirty']  # unrelated same-route edit remains pending for autosave
+
+
+def test_add_watch_4xx_keeps_wizard_and_shows_server_rejection(page):
+    _open_cfg(page)
+    page.evaluate("showCfgPanel('watch')")
+    result = page.evaluate("""async() => {
+      Object.assign(CFG_WIZ,{open:true,step:4,from:'SHA',to:'JFK',fromName:'上海',toName:'纽约',
+        dates:['2026-12-17'],returnDate:'',rows:[],selected:'',target:'500',strong:true});
+      cfgWatchRender();const savedFetch=window.fetch;
+      window.fetch=async url=>String(url)==='/api/config'
+        ?{ok:false,status:409,json:async()=>({ok:false,err:'配置版本已变化'})}
+        :{ok:true,status:200,json:async()=>({ok:true,saved:false})};
+      await cfgWizardSave();window.fetch=savedFetch;
+      return {open:CFG_WIZ.open,hint:document.querySelector('#cwzHint').textContent,
+        pending:CFG_WIZ_SAVE_PENDING};
+    }""")
+    assert result == {'open':True,'hint':'配置版本已变化；请核对后重试。','pending':False}

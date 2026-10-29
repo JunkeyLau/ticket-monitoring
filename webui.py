@@ -14337,8 +14337,8 @@ function cfgWizardStageRoutes(user,route,returnDate){
   const sameDirection=r=>String(r.from||'').trim().toUpperCase()===from&&String(r.to||'').trim().toUpperCase()===to;
   const existing=user.routes.find(r=>sameDirection(r)&&cfgWizardRouteCompatible(r,leg));
   const dates=Array.isArray(leg.dates)?leg.dates:[];
-  if(!existing){const conflict=user.routes.find(r=>sameDirection(r)&&r.enabled!==false&&r.ret_dates==null&&!String(r.ret_date||'').trim()&&!cfgWizardRouteCompatible(r,leg)&&dates.some(d=>(Array.isArray(r.dates)?r.dates:[]).includes(d)));
-   if(conflict){changes.conflicts.push({route:conflict,leg});continue}}
+  const conflict=user.routes.find(r=>sameDirection(r)&&r.enabled!==false&&r.ret_dates==null&&!String(r.ret_date||'').trim()&&!cfgWizardRouteCompatible(r,leg)&&dates.some(d=>(Array.isArray(r.dates)?r.dates:[]).includes(d)));
+  if(conflict){changes.conflicts.push({route:conflict,leg});continue}
   matches.push({leg,existing});
  }
  if(changes.conflicts.length)return changes;
@@ -14349,8 +14349,22 @@ function cfgWizardStageRoutes(user,route,returnDate){
  return changes;
 }
 function cfgWizardApplyCommittedRoutes(baseCfg,sentCfg,userName,route,returnDate){
- if(JSON.stringify(CFG)===baseCfg){CFG=JSON.parse(sentCfg);return}
- const liveUser=CFG.find(u=>u.name===userName);if(liveUser)cfgWizardStageRoutes(liveUser,route,returnDate);
+ if(JSON.stringify(CFG)===baseCfg){CFG=JSON.parse(sentCfg);return {conflicts:0,applied:true}}
+ const liveUser=CFG.find(u=>u.name===userName);if(!liveUser)return {conflicts:0,applied:false};
+ let changes=cfgWizardStageRoutes(liveUser,route,returnDate);
+ if(changes.conflicts.length){
+  /* The server committed the wizard snapshot. Keep concurrent edits on other
+     dates, while assigning the overlapping day to the committed wizard rule. */
+  const conflicts=changes.conflicts.length;
+  for(const conflict of changes.conflicts){
+   const routeDates=Array.isArray(conflict.route.dates)?conflict.route.dates:[];
+   const committedDates=new Set(conflict.leg.dates||[]);
+   conflict.route.dates=routeDates.filter(date=>!committedDates.has(date));
+  }
+  changes=cfgWizardStageRoutes(liveUser,route,returnDate);
+  return {conflicts,applied:changes.conflicts.length===0};
+ }
+ return {conflicts:0,applied:true};
 }
 function cfgWizardSetBusy(busy){
  const form=$('cwWizard');if(!form)return;
@@ -14397,11 +14411,11 @@ async function cfgWizardSave(){
  const pending=fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({users:JSON.parse(sentCfg),globals:JSON.parse(sentGlb),revision:sentRevision,wizard_user:userName,wizard_watch:wizardWatch,wizard_txid:txid})});
  CFG_SAVE_FLIGHT=pending;CFG_WIZ_SAVE_PENDING=true;cfgWizardSetBusy(true);
  try{const r=await pending;const j=await r.json();if(!r.ok||!j.ok){const err=new Error(j.err||'保存失败');err.status=r.status;throw err;}
-  cfgWizardApplyCommittedRoutes(baseCfg,sentCfg,userName,route,wizardReturnDate);
-  CFG_CLEAN=sentCfg;GLB_CLEAN=sentGlb;CFG_REVISION=j.revision||CFG_REVISION;if(CFG_WIZ.generation===wizardGeneration)CFG_WIZ.open=false;CFG_WATCH.loadedAt=0;CFG_WATCH.addOpen=false;cfgWatchRender();loadCfgWatch(true);toast(row?'航线和指定航班已开始关注':'航线已开始关注','ok');if(j.reload_warning)toast('已保存，但运行时热重载失败：'+j.reload_warning,'err');
+  const applied=cfgWizardApplyCommittedRoutes(baseCfg,sentCfg,userName,route,wizardReturnDate);
+  CFG_CLEAN=sentCfg;GLB_CLEAN=sentGlb;CFG_REVISION=j.revision||CFG_REVISION;if(CFG_WIZ.generation===wizardGeneration)CFG_WIZ.open=false;CFG_WATCH.loadedAt=0;CFG_WATCH.addOpen=false;cfgWatchRender();loadCfgWatch(true);toast(row?'航线和指定航班已开始关注':'航线已开始关注','ok');if(applied&&applied.conflicts)toast('关注已保存；保存期间同日筛选有更改，该日期采用本次关注条件，其他日期更改已保留，请检查航线。','err');if(j.reload_warning)toast('已保存，但运行时热重载失败：'+j.reload_warning,'err');
  }catch(e){
   if(e && e.status>=400 && e.status<500){
-   if(saveBtn)saveBtn.disabled=false;cfgWizardHint((e.message||'保存被拒绝')+'；请核对后重试。');
+   cfgWizardHint((e.message||'保存被拒绝')+'；请核对后重试。');
   }else{
    let receipt=null;
    for(let attempt=0;attempt<6;attempt++){
@@ -14409,7 +14423,7 @@ async function cfgWizardSave(){
     catch(_receiptError){}
     await new Promise(resolve=>setTimeout(resolve,250));
    }
-   if(receipt){cfgWizardApplyCommittedRoutes(baseCfg,sentCfg,userName,route,wizardReturnDate);CFG_CLEAN=sentCfg;GLB_CLEAN=sentGlb;CFG_REVISION=receipt.revision||CFG_REVISION;if(CFG_WIZ.generation===wizardGeneration)CFG_WIZ.open=false;CFG_WATCH.loadedAt=0;CFG_WATCH.addOpen=false;cfgWatchRender();loadCfgWatch(true);toast(row?'航线和指定航班已开始关注':'航线已开始关注','ok');if(receipt.reload_warning)toast('已保存，但运行时热重载失败：'+receipt.reload_warning,'err');}
+   if(receipt){const applied=cfgWizardApplyCommittedRoutes(baseCfg,sentCfg,userName,route,wizardReturnDate);CFG_CLEAN=sentCfg;GLB_CLEAN=sentGlb;CFG_REVISION=receipt.revision||CFG_REVISION;if(CFG_WIZ.generation===wizardGeneration)CFG_WIZ.open=false;CFG_WATCH.loadedAt=0;CFG_WATCH.addOpen=false;cfgWatchRender();loadCfgWatch(true);toast(row?'航线和指定航班已开始关注':'航线已开始关注','ok');if(applied&&applied.conflicts)toast('关注已保存；保存期间同日筛选有更改，该日期采用本次关注条件，其他日期更改已保留，请检查航线。','err');if(receipt.reload_warning)toast('已保存，但运行时热重载失败：'+receipt.reload_warning,'err');}
    else{cfgWizardHint('保存状态暂时无法确认，已保留向导填写内容。请刷新查看是否已添加；如未添加，可再提交一次。');}
   }
   if(e && e.status)console.warn('add-watch save response',e.status,e.message||'');
