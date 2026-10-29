@@ -311,3 +311,95 @@ def test_city_panel_reopening_does_not_leave_page_scroll_locked(page):
     assert page.evaluate('window.scrollY') > 0
     page.evaluate("document.body.style.overflow='hidden';cityPanelOpen(document.querySelector(\"#cfgview [id^='rtFrom_']\"));cityPanelClose()")
     assert page.evaluate("document.body.style.overflow") == 'hidden'
+
+
+def test_add_watch_opens_linear_four_step_wizard_and_intl_deadline_defaults_unlimited(page):
+    _open_cfg(page)
+    page.evaluate("showCfgPanel('watch')")
+    page.wait_for_selector('#cfgWatch')
+    # Opening the wizard from an edited configuration must flush the normal
+    # autosave path before transitioning; the former cfgSave typo was undefined.
+    page.evaluate("CFG[0].name=CFG[0].name+'*'; saveCfg=async()=>{CFG_CLEAN=JSON.stringify(CFG)}")
+    page.locator('#cfgWatch [data-cwact="wizard"]').click()
+    page.wait_for_selector('#cwWizard')
+    assert page.locator('#cwWizard .cwf-wsteps').inner_text().count('航线') == 1
+    page.locator('#cwWizard [data-cwzpair="SHA|JFK|上海|纽约"]').click()
+    assert '国际航线' in page.locator('#cwWizard .cw-meta').first.inner_text()
+    page.locator('#cwWizard [data-cwznext]').click()
+    assert page.evaluate('CFG_WIZ.step') == 2, page.locator('#cwzHint').inner_text()
+    from datetime import date, timedelta
+    day = (date.today() + timedelta(days=30)).isoformat()
+    page.locator('#cwzDate').fill(day)
+    page.locator('#cwzDateEnd').fill(day)
+    page.locator('#cwWizard [data-cwzdateadd]').click()
+    page.locator('#cwWizard [data-cwznext]').click()
+    assert page.locator('#cwWizard [data-cwzprobe]').inner_text() == '立即查询'
+    # Newly added routes retain the domestic legacy default, then switch to
+    # explicit unlimited only after the destination becomes international.
+    result = page.evaluate("""() => {
+      const i=0; addRoute(i); const j=CFG[i].routes.length-1;
+      const domestic=CFG[i].routes[j].transfer_arrival_max;
+      setRoute(i,j,'to','JFK');
+      buildForm();
+      const intlOptions=[...document.querySelector('[data-rk="0:'+j+'"] [aria-label="中转最晚到达限制"]').options].map(o=>o.value);
+      setRoute(i,j,'to','SYX');
+      buildForm();
+      const domesticOptions=[...document.querySelector('[data-rk="0:'+j+'"] [aria-label="中转最晚到达限制"]').options].map(o=>o.value);
+      CFG_WIZ.from='SHA'; CFG_WIZ.to='JFK'; CFG_WIZ.dates=['2026-12-17','2026-12-18']; CFG_WIZ.returnDate='2026-12-20';
+      const plans=cfgWizardPlans();
+      return [domestic,CFG[i].routes[j].transfer_arrival_max,intlOptions,domesticOptions,plans];
+    }""")
+    assert result[:2] == ['02:00', '02:00']
+    assert '不限' in result[2] and '不限' not in result[3]
+    assert result[4] == [
+        {'from':'SHA','to':'JFK','date':'2026-12-17'},
+        {'from':'SHA','to':'JFK','date':'2026-12-18'},
+        {'from':'JFK','to':'SHA','date':'2026-12-20'}]
+    staged = page.evaluate("""() => {
+      const draft={from:'SHA',to:'JFK',from_name:'上海',to_name:'纽约',dates:['2026-12-17','2026-12-18'],alert_direct:500};
+      const fresh={routes:[]},added=cfgWizardStageRoutes(fresh,draft,'2026-12-20');
+      const freshSnapshot=JSON.stringify(fresh.routes);
+      cfgWizardRollbackRoutes(fresh,added);
+      const merged={routes:[
+        {from:'SHA',to:'JFK',ret_dates:[],dates:['2026-12-01']},
+        {from:'sha',to:'jfk',dates:['2026-12-17'],keep:'outbound'},
+        {from:'JFK',to:'SHA',ret_date:'2026-12-30',dates:['2026-12-02']},
+        {from:'JFK',to:'SHA',dates:['2026-12-19'],keep:'return'}]};
+      const before=JSON.stringify(merged.routes),changes=cfgWizardStageRoutes(merged,draft,'2026-12-20');
+      const after=JSON.stringify(merged.routes);cfgWizardRollbackRoutes(merged,changes);
+      return {fresh:freshSnapshot,added:added.added.length,restoredFresh:fresh.routes.length===0,
+        merged:after,mergedCount:changes.merged.length,addedCount:changes.added.length,
+        restored:JSON.stringify(merged.routes)===before};
+    }""")
+    fresh_routes = __import__('json').loads(staged['fresh'])
+    assert staged['added'] == 2 and staged['restoredFresh']
+    assert [(r['from'], r['to'], r['dates']) for r in fresh_routes] == [
+        ('SHA', 'JFK', ['2026-12-17', '2026-12-18']),
+        ('JFK', 'SHA', ['2026-12-20'])]
+    assert all('ret_date' not in r and 'ret_dates' not in r for r in fresh_routes)
+    merged_routes = __import__('json').loads(staged['merged'])
+    assert staged['mergedCount'] == 2 and staged['addedCount'] == 0
+    assert merged_routes[0]['dates'] == ['2026-12-01']  # round-trip stays separate
+    assert merged_routes[1]['dates'] == ['2026-12-17', '2026-12-18']
+    assert merged_routes[3]['dates'] == ['2026-12-19', '2026-12-20']
+    assert staged['restored']
+    # An uncertain POST with no durable receipt must roll the provisional
+    # route back out of CFG while retaining the wizard draft. Repeated retry
+    # attempts therefore cannot append duplicate outbound/return routes.
+    retry = page.evaluate("""async() => {
+      const user=CFG.find(u=>u.name===cfgWatchName()), before=user.routes.length;
+      Object.assign(CFG_WIZ,{open:true,step:4,from:'SHA',to:'JFK',
+        fromName:'上海',toName:'纽约',dates:['2026-12-17'],returnDate:'',
+        rows:[],selected:'',target:'',strong:true});
+      const savedFetch=window.fetch;
+      window.fetch=async url=>String(url).startsWith('/api/config/wizard-result?')
+        ?{ok:true,status:200,json:async()=>({ok:true,saved:false})}
+        :{ok:false,status:503,json:async()=>({ok:false,err:'network uncertain'})};
+      await cfgWizardSave(); const once=user.routes.length;
+      await cfgWizardSave(); const twice=user.routes.length;
+      window.fetch=savedFetch;
+      return {before,once,twice,open:CFG_WIZ.open,dates:CFG_WIZ.dates.slice()};
+    }""")
+    assert retry['once'] == retry['before']
+    assert retry['twice'] == retry['before']
+    assert retry['open'] and retry['dates'] == ['2026-12-17']

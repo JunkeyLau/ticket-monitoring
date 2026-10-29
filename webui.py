@@ -14314,6 +14314,22 @@ function cfgWizardAddDates(){
  for(let d=new Date(d0);d<=d1;d.setDate(d.getDate()+1)){add.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));if(add.length>max)break}
  CFG_WIZ.dates=[...new Set([...CFG_WIZ.dates,...add])].sort();if(CFG_WIZ.dates.length>max){CFG_WIZ.dates=CFG_WIZ.dates.slice(0,max);cfgWizardHint('最多关注 '+max+' 个出发日。')};cfgWatchRender();
 }
+function cfgWizardStageRoutes(user,route,returnDate){
+ user.routes=user.routes||[];const changes={added:[],merged:[]};
+ const legs=[route];
+ if(returnDate){const back=Object.assign({},route,{from:route.to,to:route.from,from_name:route.to_name,to_name:route.from_name,dates:[returnDate]});legs.push(back)}
+ for(const leg of legs){
+  const from=String(leg.from||'').trim().toUpperCase(),to=String(leg.to||'').trim().toUpperCase();
+  const existing=user.routes.find(r=>String(r.from||'').trim().toUpperCase()===from&&String(r.to||'').trim().toUpperCase()===to&&r.ret_dates==null&&!String(r.ret_date||'').trim());
+  if(existing){const hadDates=Object.prototype.hasOwnProperty.call(existing,'dates');changes.merged.push({route:existing,hadDates,dates:hadDates&&Array.isArray(existing.dates)?existing.dates.slice():existing.dates});existing.dates=[...new Set([...(Array.isArray(existing.dates)?existing.dates:[]),...(leg.dates||[])])].sort()}
+  else{const added=Object.assign({},leg);delete added.ret_date;delete added.ret_dates;user.routes.push(added);changes.added.push(added)}
+ }
+ return changes;
+}
+function cfgWizardRollbackRoutes(user,changes){
+ for(const item of [...(changes.merged||[])].reverse()){if(item.hadDates)item.route.dates=item.dates;else delete item.route.dates}
+ for(const route of [...(changes.added||[])].reverse()){const i=user.routes.indexOf(route);if(i>=0)user.routes.splice(i,1)}
+}
 function cfgWizardPlans(){
  const plans=CFG_WIZ.dates.map(date=>({from:CFG_WIZ.from,to:CFG_WIZ.to,date}));
  if(CFG_WIZ.returnDate)plans.push({from:CFG_WIZ.to,to:CFG_WIZ.from,date:CFG_WIZ.returnDate});
@@ -14340,9 +14356,8 @@ async function cfgWizardSave(){
  const dates=[...CFG_WIZ.dates].sort();if(!dates.length)return cfgWizardHint('至少需要一个出发日期。');
  const intl=isIntlCode(CFG_WIZ.from)||isIntlCode(CFG_WIZ.to),target=Math.max(0,Number(($('cwzTarget')||{}).value)||0),strong=!!(($('cwzStrong')||{}).checked);
  CFG_WIZ.target=target?String(target):'';CFG_WIZ.strong=strong;
- const route={from:CFG_WIZ.from,to:CFG_WIZ.to,from_name:CFG_WIZ.fromName||CFG_WIZ.from,to_name:CFG_WIZ.toName||CFG_WIZ.to,dates,ret_date:CFG_WIZ.returnDate||'',alert_direct:target,alert_transfer:target,transfer_arrival_max:intl?'不限':'02:00',transfer_layover_min:Number(($('cwzLay')||{}).value)||0,min_baggage:Number(($('cwzBag')||{}).value)||0,no_cross:!!(($('cwzNoCross')||{}).checked)};
- user.routes=user.routes||[];const routesAdded=[route];user.routes.push(route);
- if(CFG_WIZ.returnDate){const back=Object.assign({},route,{from:route.to,to:route.from,from_name:route.to_name,to_name:route.from_name,dates:[CFG_WIZ.returnDate],ret_date:''});routesAdded.push(back);user.routes.push(back)}
+ const route={from:CFG_WIZ.from,to:CFG_WIZ.to,from_name:CFG_WIZ.fromName||CFG_WIZ.from,to_name:CFG_WIZ.toName||CFG_WIZ.to,dates,alert_direct:target,alert_transfer:target,transfer_arrival_max:intl?'不限':'02:00',transfer_layover_min:Number(($('cwzLay')||{}).value)||0,min_baggage:Number(($('cwzBag')||{}).value)||0,no_cross:!!(($('cwzNoCross')||{}).checked)};
+ const routeChanges=cfgWizardStageRoutes(user,route,CFG_WIZ.returnDate);
  const row=(CFG_WIZ.rows||[]).find((x,i)=>String(x.rowKey||x.id||i)===CFG_WIZ.selected);let wizardWatch=null;
  if(row){const plans=cfgWizardPlans();
   const plan=plans[Number(row.leg)||0]||plans[0];wizardWatch={from:plan.from,to:plan.to,date:plan.date,code:row.code||row.name,depTime:row.depTime,arrTime:row.arrTime,trans:row.transCity||'',cross:row.crossDayDesc||'',stop:!!row.stop,cabin:row.cabin||'',channels:CFG_WIZ.channels,target:target||null,active:true,notify:strong,note:''};}
@@ -14355,7 +14370,7 @@ async function cfgWizardSave(){
   CFG_CLEAN=sentCfg;GLB_CLEAN=sentGlb;CFG_REVISION=j.revision||CFG_REVISION;CFG_WIZ.open=false;CFG_WATCH.loadedAt=0;CFG_WATCH.addOpen=false;cfgWatchRender();loadCfgWatch(true);toast(row?'航线和指定航班已开始关注':'航线已开始关注','ok');if(j.reload_warning)toast('已保存，但运行时热重载失败：'+j.reload_warning,'err');
  }catch(e){
   if(e && e.status>=400 && e.status<500){
-   for(const added of routesAdded){const i=user.routes.indexOf(added);if(i>=0)user.routes.splice(i,1)}
+   cfgWizardRollbackRoutes(user,routeChanges)
    if(saveBtn)saveBtn.disabled=false;cfgWizardHint((e.message||'保存被拒绝')+'；请核对后重试。');
   }else{
    let receipt=null;
@@ -14365,7 +14380,7 @@ async function cfgWizardSave(){
     await new Promise(resolve=>setTimeout(resolve,250));
    }
    if(receipt){CFG_CLEAN=sentCfg;GLB_CLEAN=sentGlb;CFG_REVISION=receipt.revision||CFG_REVISION;CFG_WIZ.open=false;CFG_WATCH.loadedAt=0;CFG_WATCH.addOpen=false;cfgWatchRender();loadCfgWatch(true);toast(row?'航线和指定航班已开始关注':'航线已开始关注','ok');if(receipt.reload_warning)toast('已保存，但运行时热重载失败：'+receipt.reload_warning,'err');}
-   else{for(const added of routesAdded){const i=user.routes.indexOf(added);if(i>=0)user.routes.splice(i,1)}if(saveBtn)saveBtn.disabled=false;cfgWizardHint('保存状态暂时无法确认，已保留向导填写内容。请刷新查看是否已添加；如未添加，可再提交一次。');}
+   else{cfgWizardRollbackRoutes(user,routeChanges);if(saveBtn)saveBtn.disabled=false;cfgWizardHint('保存状态暂时无法确认，已保留向导填写内容。请刷新查看是否已添加；如未添加，可再提交一次。');}
   }
   if(e && e.status)console.warn('add-watch save response',e.status,e.message||'');
  }finally{if(CFG_SAVE_FLIGHT===pending)CFG_SAVE_FLIGHT=null;}
@@ -22580,6 +22595,7 @@ def _wizard_receipt_path(config_path, txid):
 
 def _wizard_write_receipt(config_path, receipt):
     import tempfile as _tempfile
+    import time as _time
     txid = receipt.get("txid")
     if not re.fullmatch(r"[0-9a-f]{32}", str(txid or "")):
         return
@@ -22592,6 +22608,26 @@ def _wizard_write_receipt(config_path, receipt):
             f.flush()
             os.fsync(f.fileno())
         os.replace(staged, path)
+        # Receipts only support short-lived recovery after an uncertain save.
+        # Prune exact transaction filenames older than 24 hours; cleanup must
+        # never turn a successfully published receipt into a failed save.
+        cutoff = _time.time() - 24 * 60 * 60
+        prefix = ".ticket-monitoring-wizard-receipt-"
+        try:
+            for name in os.listdir(os.path.dirname(path)):
+                if not (name.startswith(prefix) and name.endswith(".json")):
+                    continue
+                candidate_id = name[len(prefix):-5]
+                if not re.fullmatch(r"[0-9a-f]{32}", candidate_id):
+                    continue
+                candidate = os.path.join(os.path.dirname(path), name)
+                try:
+                    if os.path.isfile(candidate) and os.path.getmtime(candidate) < cutoff:
+                        os.unlink(candidate)
+                except OSError:
+                    pass
+        except OSError:
+            pass
     finally:
         if os.path.exists(staged):
             os.unlink(staged)

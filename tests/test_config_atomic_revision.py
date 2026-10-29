@@ -138,6 +138,31 @@ def test_wizard_transaction_receipt_identifies_exact_commit(config_server,
                         'reload_warning': ''}
 
 
+def test_wizard_receipt_writer_prunes_only_receipts_older_than_24_hours(
+        tmp_path):
+    import os
+    import time
+    import webui
+    config_path = tmp_path / 'config.yaml'
+    now = time.time()
+    old = tmp_path / ('.ticket-monitoring-wizard-receipt-' + 'a' * 32 + '.json')
+    recent = tmp_path / ('.ticket-monitoring-wizard-receipt-' + 'b' * 32 + '.json')
+    unrelated = tmp_path / '.ticket-monitoring-wizard-receipt-not-a-txid.json'
+    old.write_text('{}')
+    recent.write_text('{}')
+    unrelated.write_text('{}')
+    os.utime(old, (now - 25 * 60 * 60, now - 25 * 60 * 60))
+    os.utime(recent, (now - 23 * 60 * 60, now - 23 * 60 * 60))
+
+    webui._wizard_write_receipt(str(config_path), {'txid': 'c' * 32,
+                                                   'saved': True})
+
+    assert not old.exists()
+    assert recent.exists()
+    assert unrelated.exists()
+    assert (tmp_path / ('.ticket-monitoring-wizard-receipt-' + 'c' * 32 + '.json')).exists()
+
+
 def test_watch_read_recovers_pending_config_watch_pair(config_server,
                                                         tmp_path, monkeypatch):
     import webui
