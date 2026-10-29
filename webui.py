@@ -23850,10 +23850,14 @@ def _user_state(u):
             return r.get("enabled") is not False
         return getattr(r, "enabled", True) is not False
     routes = []
-    for _config_index, _raw_route in enumerate(u.get("routes") or []):
+    for _runtime_index, _raw_route in enumerate(u.get("routes") or []):
         if not _enabled(_raw_route):
             continue
         _route = _route_view(_raw_route)
+        _config_index = (
+            _raw_route.get("config_index", _runtime_index)
+            if isinstance(_raw_route, dict)
+            else getattr(_raw_route, "_config_index", _runtime_index))
         _route["config_index"] = _config_index
         def _route_field(name, default=None):
             if isinstance(_raw_route, dict):

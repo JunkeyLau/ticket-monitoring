@@ -74,6 +74,12 @@ def test_route_selection_and_target_edit_are_stable_and_unambiguous():
     assert '"config_round_trip": r.get("config_round_trip", False)' in state
     assert "routes_arr = []" in state
     assert "seen_rd" not in state
+    main = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
+    build_routes = main[main.index("def build_routes(routes_cfg: list)"):
+                        main.index("def build_users(cfg: dict)")]
+    assert "for config_index, r in enumerate(routes_cfg or []):" in build_routes
+    assert "route._config_index = config_index" in build_routes
+    assert "getattr(_raw_route, \"_config_index\", _runtime_index)" in state
 
 
 def test_user_state_keeps_config_identity_for_route_objects_and_dicts(tmp_path):
@@ -81,9 +87,11 @@ def test_user_state_keeps_config_identity_for_route_objects_and_dicts(tmp_path):
     PriceStorage(dbp)
     old_cfg = webui._State.cfg
     webui._State.cfg = {"output": {"db_path": dbp}}
+    one_way = Route("SHA", "上海", "JFK", "纽约", ["2026-12-17"])
+    one_way._config_index = 1  # raw config index after a filtered disabled rule
     routes = [
-        Route("SHA", "上海", "JFK", "纽约", ["2026-12-17"]),
-        {"from": "SHA", "from_name": "上海", "to": "JFK",
+        one_way,
+        {"config_index": 2, "from": "SHA", "from_name": "上海", "to": "JFK",
          "to_name": "纽约", "dates": ["2026-12-17"], "ret_dates": ["2027-01-01"]},
     ]
     try:
@@ -91,7 +99,7 @@ def test_user_state_keeps_config_identity_for_route_objects_and_dicts(tmp_path):
     finally:
         webui._State.cfg = old_cfg
     rows = state["routesArr"]
-    assert [r["config_index"] for r in rows] == [0, 1]
+    assert [r["config_index"] for r in rows] == [1, 2]
     assert [r["config_round_trip"] for r in rows] == [False, True]
 
 

@@ -81,7 +81,7 @@ def _sent_hit_text(plat: str, k: str, hit: int, n: int) -> str:
 
 def build_routes(routes_cfg: list) -> list:
     routes = []
-    for r in routes_cfg or []:
+    for config_index, r in enumerate(routes_cfg or []):
         if r.get("enabled") is False:
             # 停用航线：配置保留在 config.yaml（心理线/日期不丢），
             # 不入运行时模型——调度、状态、明细、日历全链路自动豁免
@@ -92,7 +92,7 @@ def build_routes(routes_cfg: list) -> list:
         # 的双源劈叉
         _tr = 0 if r.get("direct_only") else float(
             r.get("alert_transfer", 0) or 0)
-        routes.append(Route(
+        route = Route(
             from_code=r["from"],
             from_name=r.get("from_name", r["from"]),
             to_code=r["to"],
@@ -140,7 +140,10 @@ def build_routes(routes_cfg: list) -> list:
             no_lcc=bool(r.get("no_lcc", False)),
             min_baggage=int(r.get("min_baggage", 0) or 0),
             widebody_only=bool(r.get("widebody_only", False)),
-        ))
+        )
+        # 状态页的配置编辑需要回指过滤 disabled 后的原配置位置。
+        route._config_index = config_index
+        routes.append(route)
     return routes
 
 
