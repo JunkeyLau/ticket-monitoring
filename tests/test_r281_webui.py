@@ -224,6 +224,7 @@ def test_channel_lamp_clears_stale_collection_failure_on_empty_pulse(srv):
       window._channelHealthHasRounds=true;window._channelPulseHasRounds=true;
       window._ovPushStreak=0;window._ovCollectFails=2;
       PU=null;PU_CACHE=null;PU_ETAG='';
+      renderChannelLamp();
       const hadFailure=channelLamp.classList.contains('bad');
       const oldFetch=window.fetch;
       window.fetch=async()=>new Response(JSON.stringify({ok:true,rounds:[]}),
