@@ -8395,7 +8395,7 @@ try{
   if(m)btn.setAttribute('aria-controls',m[1]);
  });
 }catch(e){}
-let FOLLOW_SELECTION='',FOLLOW_RENDERED='';
+let FOLLOW_SELECTION='',FOLLOW_RENDERED='',FOLLOW_SCOPE=null,FOLLOW_CFG_LOADING=false,FOLLOW_CFG_LAST_TRY=0;
 function showMonTab(t,silent,hist){
  /* 旧关注入口深链统一落到新的清单；视图内选择具体航线或航班。 */
  const legacyFollowTab=t;
@@ -9164,6 +9164,7 @@ function filteredRows(){const u=S.users[U];
    if(!WATCH_KEYS||(!WATCH_KEYS.all.has(base)
      &&!WATCH_KEYS.ch.has(base+'|'+srxPlatKey(f.platKey||f.plat))))return false;
   }
+  if(!followRowInScope(f))return false;
   if(FLT.plats.size&&!FLT.plats.has(f.plat))return false;
   if(FLT.routes.size&&f.route&&!FLT.routes.has(f.route))return false;
   if(FLT.dates.size&&!FLT.dates.has(f.date))return false;
@@ -9840,7 +9841,7 @@ function followItems(){
  const routes=(user&&user.routesArr)||[];
  const watches=window._monWatches||[];
  const userName=String(user&&user.name||'');
- return routes.map((r,i)=>{const routeLabel=String(r.label||((r.from_name||r.from||'—')+'→'+(r.to_name||r.to||'—'))).replace(/\s+\d{2}[/]\d{2}\s*$/,'');const id=[userName,r.from||'',r.to||'',r.date||''].map(encodeURIComponent).join('|');return {kind:'route',id, index:i,route:r,label:routeLabel+(r.date?' · '+r.date:''),meta:'航线走势 · '+(r.date||'日期未设置')}})
+ return routes.map((r,i)=>{const routeLabel=String(r.label||((r.from_name||r.from||'—')+'→'+(r.to_name||r.to||'—'))).replace(/\s+\d{2}[/]\d{2}\s*$/,'');const id=[userName,r.from||'',r.to||'',r.date||''].map(encodeURIComponent).join('|');return {kind:'route',id,index:i,route:r,label:routeLabel+(r.date?' · '+r.date:''),meta:'航线走势 · '+(r.date||'日期未设置')}})
   .concat(watches.map(w=>({kind:'watch',id:String(w.id||''),watch:w,label:(w.code||'航班')+' · '+srxPairName(w.from,w.to),meta:(w.date||'')+' · '+(w.active===false?'已暂停':'目标 '+(w.target==null?'未设':'¥'+w.target))})))
   .filter(x=>x.kind==='route'||x.id);
 }
@@ -9866,26 +9867,28 @@ function followSelect(kind,id){
  FOLLOW_RENDERED='';followRenderList();
 }
 function followItemSignature(item){const u=(S&&S.users&&S.users[U])||{},r=item.route||{},w=item.watch||{};return JSON.stringify([u.name,item.kind,item.id,item.index,r.from,r.to,r.date,r.th,w.id,w.date,w.target,w.channels,w.active,w.notify])}
+function followRowInScope(f){return !FOLLOW_SCOPE||(f.route===FOLLOW_SCOPE.route&&(!FOLLOW_SCOPE.date||f.date===FOLLOW_SCOPE.date))}
 function followRenderDetail(item){
  followMount();const empty=$('followDetailEmpty'),rd=$('followRouteDetail'),fd=$('followFlightDetail');
- if(!item){if(empty)empty.hidden=false;if(rd)rd.hidden=true;if(fd)fd.hidden=true;return}
+ if(!item){FOLLOW_SCOPE=null;if(empty)empty.hidden=false;if(rd)rd.hidden=true;if(fd)fd.hidden=true;return}
  if(empty)empty.hidden=true;
  if(item.kind==='route'){
   if(rd)rd.hidden=false;if(fd)fd.hidden=true;
   const title=$('followRouteTitle'),meta=$('followRouteMeta');
   const r=item.route||{},u=(S&&S.users&&S.users[U])||{};
   if(title)title.textContent=item.label;
-  if(!CFG)loadCfg().then(()=>{FOLLOW_RENDERED='';followRenderList()}).catch(()=>{});
+  followEnsureConfig();
   const match=followConfigRoute(item),th=r.th||{},disabled=match?'':' disabled';
-  if(meta)meta.innerHTML='日期 '+he(r.date||'未设置')+' · 直飞目标 ¥<input class="follow-target" aria-label="直飞目标价" type="number" min="0" step="10"'+disabled+' value="'+he(th.direct||0)+'" onchange="followSetRouteTarget(\''+he(item.id)+'\',\'alert_direct\',this.value)"> · 中转目标 ¥<input class="follow-target" aria-label="中转目标价" type="number" min="0" step="10"'+disabled+' value="'+he(th.transfer||0)+'" onchange="followSetRouteTarget(\''+he(item.id)+'\',\'alert_transfer\',this.value)">'+(match?'':' · 配置匹配不唯一，请到航线配置中修改');
+  if(meta)meta.innerHTML='日期 '+he(r.date||'未设置')+' · 直飞目标 ¥<input class="follow-target" aria-label="直飞目标价" type="number" min="0" step="10"'+disabled+' value="'+he(th.direct||0)+'" onchange="followSetRouteTarget(\''+he(item.id)+'\',\'alert_direct\',this.value)"> · 中转目标 ¥<input class="follow-target" aria-label="中转目标价" type="number" min="0" step="10"'+disabled+' value="'+he(th.transfer||0)+'" onchange="followSetRouteTarget(\''+he(item.id)+'\',\'alert_transfer\',this.value)">'+(match?'':' · 配置未就绪或匹配不唯一，请到航线配置中修改');
   let st=CHR[u.name];if(typeof st==='number')st={i:st};st=st||{};st.i=item.index;st.r=(st.r==='48h'||st.r==='7d'||TREND_LONG[st.r])?st.r:'7d';CHR[u.name]=st;saveUI();
-  FLT.routes=new Set([String(r.label||'').replace(/\s+\d{2}[/]\d{2}\s*$/,'')]);
-  FLT.dates=r.date?new Set([r.date]):new Set();
+  const routeKey=String(r.label||'').replace(/\s+\d{2}[/]\d{2}\s*$/,'');
+  FOLLOW_SCOPE={route:routeKey,date:String(r.date||'')};
   buildRouteChips();buildDateChips();
+  FLT.routes=new Set([routeKey]);FLT.dates=r.date?new Set([r.date]):new Set();
   const trend=$('montab-trend'),details=$('montab-details');if(trend)trend.style.display='';if(details)details.style.display='';
   chart();renderCal();table();
  }else{
-  if(rd)rd.hidden=true;if(fd)fd.hidden=false;
+  FOLLOW_SCOPE=null;if(rd)rd.hidden=true;if(fd)fd.hidden=false;
   const trend=$('montab-trend'),details=$('montab-details');if(trend)trend.style.display='none';if(details)details.style.display='none';
   const studio=$('watchStudio');if(studio)studio.style.display='';
   WS.focus=item.id;WS.route='';
@@ -9896,12 +9899,18 @@ function followRenderDetail(item){
 function followConfigRoute(item){
  const user=(S&&S.users&&S.users[U])||{},cfgUser=(CFG||[]).find(x=>x.name===user.name);
  if(!cfgUser)return null;
- const row=(item&&item.route)||{},routes=cfgUser.routes||[],date=String(row.date||'');
- const matches=routes.map((r,index)=>({r,index})).filter(x=>x.r.enabled!==false&&!x.r.ret_dates&&!String(x.r.ret_date||'').trim()&&x.r.from===row.from&&x.r.to===row.to&&(!date||(x.r.dates||[]).includes(date)));
+ const row=(item&&item.route)||{},routes=cfgUser.routes||[],date=String(row.date||''),matches=routes.map((r,index)=>({r,index})).filter(x=>x.r.enabled!==false&&x.r.from===row.from&&x.r.to===row.to&&(x.r.dates||[]).includes(date));
  if(matches.length!==1)return null;
- const {r,index}=matches[0];return {index,route:r,user:cfgUser,ui:(CFG||[]).indexOf(cfgUser)};
+ const {r,index}=matches[0];
+ if(r.ret_dates!=null||String(r.ret_date||'').trim())return null;
+ return {index,route:r,user:cfgUser,ui:(CFG||[]).indexOf(cfgUser)};
 }
 function followEditRoute(){switchView('cfg');showCfgPanel('users');toast('已打开航线条件配置；修改会沿用配置自动保存与版本冲突处理','')}
+function followEnsureConfig(){
+ if(CFG||FOLLOW_CFG_LOADING||Date.now()-FOLLOW_CFG_LAST_TRY<15000)return;
+ FOLLOW_CFG_LOADING=true;FOLLOW_CFG_LAST_TRY=Date.now();
+ loadCfg().then(ok=>{if(ok){FOLLOW_CFG_LAST_TRY=0;FOLLOW_RENDERED='';followRenderList()}}).finally(()=>{FOLLOW_CFG_LOADING=false});
+}
 async function followSetRouteTarget(routeIndex,key,value){
  try{
   if(!CFG)await loadCfg();
@@ -13839,8 +13848,8 @@ async function loadCfg(){try{
   inps.forEach((inp,i)=>{
    if(inp.getAttribute('aria-label'))return;
    inp.setAttribute('aria-label',b.textContent.trim()
-    +(inps.length>1?' '+(i+1):''));});});}catch(e){}}catch(e){cfgErr('配置读取失败: '+e);
- const _cg=$('cfgglobals');if(_cg)_cg.innerHTML='<span class="muted">加载失败——服务未启动或请求异常，恢复后刷新页面</span>';}}   // cfgErr 双通道（cfgmsg+toast）：cfgmsg 挂 users 面板，非 users 页签下也必达；cfgglobals 错误态落点（r236 P2-1）：静态「加载中…」是首次成功前的占位，失败分支不写即永不到达（二十三§1）
+    +(inps.length>1?' '+(i+1):''));});});}catch(e){}return true}catch(e){cfgErr('配置读取失败: '+e);
+ const _cg=$('cfgglobals');if(_cg)_cg.innerHTML='<span class="muted">加载失败——服务未启动或请求异常，恢复后刷新页面</span>';return false}}   // cfgErr 双通道（cfgmsg+toast）：cfgmsg 挂 users 面板，非 users 页签下也必达；cfgglobals 错误态落点（r236 P2-1）：静态「加载中…」是首次成功前的占位，失败分支不写即永不到达（二十三§1）
 /* ===== r351 配置中心 · 航班监控（独立于检索页） ===== */
 const CFG_WATCH={user:'',list:[],edit:'',formUser:'',trend:{},confirm:'',busy:false,known:{},
  route:'',q:'',status:'',targetState:'',channel:'',addOpen:false,ft:null,

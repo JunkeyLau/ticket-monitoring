@@ -32,7 +32,7 @@ def test_follow_board_combines_route_and_flight_rows_and_details():
 
 def test_follow_edits_reuse_existing_save_paths_and_add_wizard():
     assert "setRoute(match.ui,match.index,key,v)" in SRC
-    assert "x.r.from===row.from&&x.r.to===row.to&&(!date||(x.r.dates||[]).includes(date))" in SRC
+    assert "x.r.from===row.from&&x.r.to===row.to&&(x.r.dates||[]).includes(date)" in SRC
     assert "wsPost({op:'update',id,patch:{target}})" in SRC
     assert "wsPost({op:'update',id,patch:{channels:[...channels]}})" in SRC
     assert "function followAdd()" in SRC and "cfgWatchWizardOpen()" in SRC
@@ -46,9 +46,11 @@ def test_follow_edits_reuse_existing_save_paths_and_add_wizard():
 def test_route_details_filter_to_the_selected_route_and_date():
     detail = SRC[SRC.index("function followRenderDetail(item)"):
                  SRC.index("function followConfigRoute(item)")]
-    assert "FLT.routes=new Set([String(r.label||'').replace" in detail
-    assert "FLT.dates=r.date?new Set([r.date]):new Set()" in detail
+    assert "FOLLOW_SCOPE={route:routeKey,date:String(r.date||'')}" in detail
+    assert "FLT.routes=new Set([routeKey]);FLT.dates=r.date?new Set([r.date]):new Set()" in detail
     assert "buildRouteChips();buildDateChips();" in detail
+    assert "function followRowInScope(f)" in SRC
+    assert "if(!followRowInScope(f))return false" in SRC
 
 
 def test_route_selection_and_target_edit_are_stable_and_unambiguous():
@@ -57,9 +59,19 @@ def test_route_selection_and_target_edit_are_stable_and_unambiguous():
     assert "function followItemSignature(item)" in SRC
     match = SRC[SRC.index("function followConfigRoute(item)"):
                 SRC.index("function followEditRoute()")]
-    assert "x.r.enabled!==false" in match
-    assert "!x.r.ret_dates&&!String(x.r.ret_date||'').trim()" in match
+    assert "x.r.enabled!==false&&x.r.from===row.from" in match
     assert "if(matches.length!==1)return null" in match
+    assert "if(r.ret_dates!=null||String(r.ret_date||'').trim())return null" in match
+
+
+def test_config_read_retry_is_single_flight_and_rate_limited():
+    ensure = SRC[SRC.index("function followEnsureConfig()"):SRC.index("async function followSetRouteTarget")]
+    assert "FOLLOW_CFG_LOADING" in ensure
+    assert "Date.now()-FOLLOW_CFG_LAST_TRY<15000" in ensure
+    assert "loadCfg().then(ok=>{if(ok)" in ensure
+    load = SRC[SRC.index("async function loadCfg()"):SRC.index("/* ===== r351 配置中心")]
+    assert "return true}catch(e)" in load
+    assert "return false}}" in load
 
 
 def test_remove_confirmation_refreshes_visible_detail_button():
