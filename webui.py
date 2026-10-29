@@ -14337,8 +14337,8 @@ function cfgWizardStageRoutes(user,route,returnDate){
   const sameDirection=r=>String(r.from||'').trim().toUpperCase()===from&&String(r.to||'').trim().toUpperCase()===to;
   const existing=user.routes.find(r=>sameDirection(r)&&cfgWizardRouteCompatible(r,leg));
   const dates=Array.isArray(leg.dates)?leg.dates:[];
-  const conflict=user.routes.find(r=>sameDirection(r)&&r.enabled!==false&&r.ret_dates==null&&!String(r.ret_date||'').trim()&&!cfgWizardRouteCompatible(r,leg)&&dates.some(d=>(Array.isArray(r.dates)?r.dates:[]).includes(d)));
-  if(conflict){changes.conflicts.push({route:conflict,leg});continue}
+  const conflicts=user.routes.filter(r=>sameDirection(r)&&r.enabled!==false&&r.ret_dates==null&&!String(r.ret_date||'').trim()&&!cfgWizardRouteCompatible(r,leg)&&dates.some(d=>(Array.isArray(r.dates)?r.dates:[]).includes(d)));
+  if(conflicts.length){for(const conflict of conflicts)changes.conflicts.push({route:conflict,leg});continue}
   matches.push({leg,existing});
  }
  if(changes.conflicts.length)return changes;
@@ -14356,15 +14356,24 @@ function cfgWizardApplyCommittedRoutes(baseCfg,sentCfg,userName,route,returnDate
   /* The server committed the wizard snapshot. Keep concurrent edits on other
      dates, while assigning the overlapping day to the committed wizard rule. */
   const conflicts=changes.conflicts.length;
+  const emptyRoutes=new Set();
   for(const conflict of changes.conflicts){
    const routeDates=Array.isArray(conflict.route.dates)?conflict.route.dates:[];
    const committedDates=new Set(conflict.leg.dates||[]);
    conflict.route.dates=routeDates.filter(date=>!committedDates.has(date));
+   if(!conflict.route.dates.length)emptyRoutes.add(conflict.route);
   }
+  if(emptyRoutes.size)liveUser.routes=liveUser.routes.filter(r=>!emptyRoutes.has(r));
   changes=cfgWizardStageRoutes(liveUser,route,returnDate);
   return {conflicts,applied:changes.conflicts.length===0};
  }
  return {conflicts:0,applied:true};
+}
+function cfgWizardBlockSaveAfterRebaseFailure(){
+ CFG_WIZ_REBASE_ERROR=true;CFG_AUTO_ERROR=true;
+ CFG_WIZ.open=false;CFG_WIZ.generation++;
+ cfgWatchRender();
+ toast('服务器已保存本次关注，但页面改动无法安全合并。自动保存已暂停；请刷新页面后核对设置。','err');
 }
 function cfgWizardSetBusy(busy){
  const form=$('cwWizard');if(!form)return;
@@ -14412,6 +14421,7 @@ async function cfgWizardSave(){
  CFG_SAVE_FLIGHT=pending;CFG_WIZ_SAVE_PENDING=true;cfgWizardSetBusy(true);
  try{const r=await pending;const j=await r.json();if(!r.ok||!j.ok){const err=new Error(j.err||'保存失败');err.status=r.status;throw err;}
   const applied=cfgWizardApplyCommittedRoutes(baseCfg,sentCfg,userName,route,wizardReturnDate);
+  if(!applied||!applied.applied){cfgWizardBlockSaveAfterRebaseFailure();return}
   CFG_CLEAN=sentCfg;GLB_CLEAN=sentGlb;CFG_REVISION=j.revision||CFG_REVISION;if(CFG_WIZ.generation===wizardGeneration)CFG_WIZ.open=false;CFG_WATCH.loadedAt=0;CFG_WATCH.addOpen=false;cfgWatchRender();loadCfgWatch(true);toast(row?'航线和指定航班已开始关注':'航线已开始关注','ok');if(applied&&applied.conflicts)toast('关注已保存；保存期间同日筛选有更改，该日期采用本次关注条件，其他日期更改已保留，请检查航线。','err');if(j.reload_warning)toast('已保存，但运行时热重载失败：'+j.reload_warning,'err');
  }catch(e){
   if(e && e.status>=400 && e.status<500){
@@ -14423,7 +14433,7 @@ async function cfgWizardSave(){
     catch(_receiptError){}
     await new Promise(resolve=>setTimeout(resolve,250));
    }
-   if(receipt){const applied=cfgWizardApplyCommittedRoutes(baseCfg,sentCfg,userName,route,wizardReturnDate);CFG_CLEAN=sentCfg;GLB_CLEAN=sentGlb;CFG_REVISION=receipt.revision||CFG_REVISION;if(CFG_WIZ.generation===wizardGeneration)CFG_WIZ.open=false;CFG_WATCH.loadedAt=0;CFG_WATCH.addOpen=false;cfgWatchRender();loadCfgWatch(true);toast(row?'航线和指定航班已开始关注':'航线已开始关注','ok');if(applied&&applied.conflicts)toast('关注已保存；保存期间同日筛选有更改，该日期采用本次关注条件，其他日期更改已保留，请检查航线。','err');if(receipt.reload_warning)toast('已保存，但运行时热重载失败：'+receipt.reload_warning,'err');}
+   if(receipt){const applied=cfgWizardApplyCommittedRoutes(baseCfg,sentCfg,userName,route,wizardReturnDate);if(!applied||!applied.applied){cfgWizardBlockSaveAfterRebaseFailure();return}CFG_CLEAN=sentCfg;GLB_CLEAN=sentGlb;CFG_REVISION=receipt.revision||CFG_REVISION;if(CFG_WIZ.generation===wizardGeneration)CFG_WIZ.open=false;CFG_WATCH.loadedAt=0;CFG_WATCH.addOpen=false;cfgWatchRender();loadCfgWatch(true);toast(row?'航线和指定航班已开始关注':'航线已开始关注','ok');if(applied&&applied.conflicts)toast('关注已保存；保存期间同日筛选有更改，该日期采用本次关注条件，其他日期更改已保留，请检查航线。','err');if(receipt.reload_warning)toast('已保存，但运行时热重载失败：'+receipt.reload_warning,'err');}
    else{cfgWizardHint('保存状态暂时无法确认，已保留向导填写内容。请刷新查看是否已添加；如未添加，可再提交一次。');}
   }
   if(e && e.status)console.warn('add-watch save response',e.status,e.message||'');
@@ -16556,7 +16566,7 @@ function glbCheck(el,returnMsg){const r=GLB_RANGES.find(x=>x.id===el.id);
  return m;}
 // Auto-save complete configuration after editing pauses. Draft flight forms
 // stay explicit because their identity is incomplete until the user submits.
-let CFG_SAVE_FLIGHT=null,CFG_WIZ_SAVE_PENDING=false,CFG_AUTO_CANDIDATE='',CFG_AUTO_SINCE=0,CFG_AUTO_TRIED='',CFG_AUTO_ERROR=false,CFG_SAVE_AUTO=false;
+let CFG_SAVE_FLIGHT=null,CFG_WIZ_SAVE_PENDING=false,CFG_WIZ_REBASE_ERROR=false,CFG_AUTO_CANDIDATE='',CFG_AUTO_SINCE=0,CFG_AUTO_TRIED='',CFG_AUTO_ERROR=false,CFG_SAVE_AUTO=false;
 let CFG_EDIT_EPOCH=0;const CFG_PENDING_INPUTS=new Set(),CFG_INPUT_BASE=new WeakMap();
 document.addEventListener('focusin',ev=>{const el=ev.target;if(el&&el.matches&&el.matches('textarea,input:not([type=checkbox]):not([type=radio])'))CFG_INPUT_BASE.set(el,el.value);});
 function cfgHasPendingInput(){for(const e of CFG_PENDING_INPUTS){if(!e.isConnected)CFG_PENDING_INPUTS.delete(e);}return CFG_PENDING_INPUTS.size>0;}
@@ -16566,6 +16576,7 @@ function cfgCoreDirty(){
   ||JSON.stringify(_canon(GLB,JSON.parse(GLB_CLEAN)))!==JSON.stringify(_canon(JSON.parse(GLB_CLEAN),null));
 }
 function cfgAutoTick(){
+ if(CFG_WIZ_REBASE_ERROR)return;
  if(typeof CFG_WIZ!=='undefined'&&CFG_WIZ.open)return;
  if(!CFG||!CFG_CLEAN||!GLB_CLEAN||CFG_SAVE_FLIGHT)return;
  let dirty=false;try{dirty=cfgCoreDirty();}catch(e){return;}
@@ -16595,6 +16606,7 @@ for(const eventName of ['input','change','click','keydown']){
 }
 setInterval(cfgAutoTick,800);
 async function saveCfg(auto=false){
+ if(CFG_WIZ_REBASE_ERROR){toast('自动保存已暂停；请刷新页面后核对设置。','err');return}
  if(CFG_SAVE_FLIGHT)return CFG_SAVE_FLIGHT;
  CFG_SAVE_AUTO=auto;
  CFG_SAVE_FLIGHT=saveCfgImpl(auto);

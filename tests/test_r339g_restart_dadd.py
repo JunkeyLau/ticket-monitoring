@@ -377,12 +377,19 @@ def test_add_watch_opens_linear_four_step_wizard_and_intl_deadline_defaults_unli
         {from:'SHA',to:'JFK',dates:['2026-12-17'],alert_direct:500,alert_transfer:500,transfer_arrival_max:'不限'},
         {from:'SHA',to:'JFK',dates:['2026-12-17'],alert_direct:1000,alert_transfer:1000}]};
       const mixedBefore=JSON.stringify(mixed.routes),mixedChange=cfgWizardStageRoutes(mixed,draft,'');
+      const many={routes:[
+        {from:'SHA',to:'JFK',dates:['2026-12-17'],alert_direct:1000,alert_transfer:1000},
+        {from:'SHA',to:'JFK',dates:['2026-12-17'],alert_direct:1100,alert_transfer:1100},
+        {from:'JFK',to:'SHA',dates:['2026-12-20'],alert_direct:1200,alert_transfer:1200},
+        {from:'JFK',to:'SHA',dates:['2026-12-20'],alert_direct:1300,alert_transfer:1300}]};
+      const manyBefore=JSON.stringify(many.routes),manyChange=cfgWizardStageRoutes(many,draft,'2026-12-20');
       return {fresh:freshSnapshot,added:added.added.length,restoredFresh:fresh.routes.length===0,
         merged:JSON.stringify(merged.routes),mergedCount:changes.merged.length,addedCount:changes.added.length,
         incompatible:{dates:incompatible.routes[0].dates,added:incompatibleChange.added.length},
         disabled:{enabled:disabled.routes[0].enabled,added:disabledChange.added.length},
         overlap:{date:overlap.routes[0].dates[0],added:overlapChange.added.length,conflicts:overlapChange.conflicts.length},
-        mixed:{added:mixedChange.added.length,merged:mixedChange.merged.length,conflicts:mixedChange.conflicts.length,unchanged:mixedBefore===JSON.stringify(mixed.routes)}};
+        mixed:{added:mixedChange.added.length,merged:mixedChange.merged.length,conflicts:mixedChange.conflicts.length,unchanged:mixedBefore===JSON.stringify(mixed.routes)},
+        many:{added:manyChange.added.length,merged:manyChange.merged.length,conflicts:manyChange.conflicts.length,unchanged:manyBefore===JSON.stringify(many.routes)}};
     }""")
     fresh_routes = __import__('json').loads(staged['fresh'])
     assert staged['added'] == 2
@@ -402,6 +409,7 @@ def test_add_watch_opens_linear_four_step_wizard_and_intl_deadline_defaults_unli
     assert staged['disabled'] == {'enabled':False,'added':1}
     assert staged['overlap'] == {'date':'2026-12-17','added':0,'conflicts':1}
     assert staged['mixed'] == {'added':0,'merged':0,'conflicts':1,'unchanged':True}
+    assert staged['many'] == {'added':0,'merged':0,'conflicts':4,'unchanged':True}
     concurrent = page.evaluate("""async() => {
       const user=CFG.find(u=>u.name===cfgWatchName());
       const route={from:'SHA',to:'JFK',dates:['2026-12-01'],alert_direct:500,alert_transfer:500,transfer_arrival_max:'不限',transfer_layover_min:0,min_baggage:0,no_cross:false};
@@ -522,3 +530,71 @@ def test_add_watch_4xx_keeps_wizard_and_shows_server_rejection(page):
         pending:CFG_WIZ_SAVE_PENDING};
     }""")
     assert result == {'open':True,'hint':'配置版本已变化；请核对后重试。','pending':False}
+
+
+def test_add_watch_success_rebases_all_single_date_conflicts_and_autosaves(page):
+    _open_cfg(page)
+    page.evaluate("showCfgPanel('watch')")
+    result = page.evaluate("""async() => {
+      const user=CFG.find(u=>u.name===cfgWatchName());
+      const outbound={from:'SHA',to:'JFK',from_name:'上海',to_name:'纽约',dates:['2026-12-17'],
+        alert_direct:500,alert_transfer:500,transfer_arrival_max:'不限',transfer_layover_min:0,min_baggage:0,no_cross:false};
+      const inbound={from:'JFK',to:'SHA',from_name:'纽约',to_name:'上海',dates:['2026-12-20'],
+        alert_direct:500,alert_transfer:500,transfer_arrival_max:'不限',transfer_layover_min:0,min_baggage:0,no_cross:false};
+      user.routes.push(outbound,inbound);
+      Object.assign(CFG_WIZ,{open:true,step:4,from:'SHA',to:'JFK',fromName:'上海',toName:'纽约',
+        dates:['2026-12-17'],returnDate:'2026-12-20',rows:[],selected:'',target:'500',strong:true});
+      cfgWatchRender();let finish,wizardBody=null,autosaved=null;const savedFetch=window.fetch;
+      window.fetch=async(url,options)=>{
+        if(String(url)!=='/api/config')return {ok:true,status:200,json:async()=>({ok:true,watches:[]})};
+        const body=JSON.parse(options.body);
+        if(body.wizard_txid){wizardBody=body;return new Promise(resolve=>{finish=resolve})}
+        autosaved=body;return {ok:true,status:200,json:async()=>({ok:true,users:1,revision:'autosaved'})};
+      };
+      const saving=cfgWizardSave();await new Promise(resolve=>setTimeout(resolve,0));
+      outbound.alert_direct=1000;outbound.alert_transfer=1000;
+      inbound.alert_direct=1200;inbound.alert_transfer=1200;
+      const outbound2={...outbound,dates:['2026-12-17'],alert_direct:1100,alert_transfer:1100};
+      const inbound2={...inbound,dates:['2026-12-20'],alert_direct:1300,alert_transfer:1300};
+      user.routes.push(outbound2,inbound2);
+      finish({ok:true,status:200,json:async()=>({ok:true,revision:'wizard-committed'})});
+      await saving;
+      const relevant=user.routes.filter(r=>(r.from==='SHA'&&r.to==='JFK')||(r.from==='JFK'&&r.to==='SHA'));
+      const safeRoutes=relevant.every(r=>Array.isArray(r.dates)&&r.dates.length>0);
+      const committed=[...wizardBody.users.find(u=>u.name===user.name).routes];
+      user.notifier=user.notifier||{};user.notifier.report_hour=7;
+      await saveCfg(true);
+      window.fetch=savedFetch;
+      return {safeRoutes,relevant:relevant.map(r=>({from:r.from,to:r.to,dates:r.dates.slice(),target:r.alert_direct})),
+        committed:committed.filter(r=>(r.from==='SHA'&&r.to==='JFK')||(r.from==='JFK'&&r.to==='SHA')).map(r=>({from:r.from,to:r.to,dates:r.dates.slice()})),
+        autoMsg:document.querySelector('#cfgmsg').textContent,
+        autosaved:!!autosaved,savedRoutes:autosaved&&autosaved.users.find(u=>u.name===user.name).routes.filter(r=>(r.from==='SHA'&&(r.to==='JFK'||r.to==='NYC'))||((r.from==='JFK'||r.from==='NYC')&&r.to==='SHA')).map(r=>({from:r.from,to:r.to,dates:r.dates.slice()})),
+        rebaseBlocked:CFG_WIZ_REBASE_ERROR};
+    }""")
+    assert result['safeRoutes']
+    assert result['autosaved'] and not result['rebaseBlocked']
+    assert {'from':'SHA','to':'NYC','dates':['2026-12-17']} in result['savedRoutes'], result
+    assert {'from':'NYC','to':'SHA','dates':['2026-12-20']} in result['savedRoutes'], result
+    assert all(x['dates'] for x in result['savedRoutes']), result
+
+
+def test_add_watch_unmergeable_success_blocks_later_saves(page):
+    _open_cfg(page)
+    page.evaluate("showCfgPanel('watch')")
+    result = page.evaluate("""async() => {
+      const user=CFG.find(u=>u.name===cfgWatchName());
+      Object.assign(CFG_WIZ,{open:true,step:4,from:'SHA',to:'JFK',fromName:'上海',toName:'纽约',
+        dates:['2026-12-17'],returnDate:'',rows:[],selected:'',target:'500',strong:true});
+      cfgWatchRender();let finish,posts=0;const savedFetch=window.fetch;
+      window.fetch=async(url,options)=>{
+        if(String(url)==='/api/config'){posts++;return new Promise(resolve=>{finish=resolve})}
+        return {ok:true,status:200,json:async()=>({ok:true,saved:false})};
+      };
+      const saving=cfgWizardSave();await new Promise(resolve=>setTimeout(resolve,0));
+      CFG.splice(CFG.indexOf(user),1);
+      finish({ok:true,status:200,json:async()=>({ok:true,revision:'committed'})});
+      await saving;const blocked=CFG_WIZ_REBASE_ERROR;
+      await saveCfg(true);cfgAutoTick();window.fetch=savedFetch;
+      return {blocked,posts,open:CFG_WIZ.open};
+    }""")
+    assert result == {'blocked':True,'posts':1,'open':False}
