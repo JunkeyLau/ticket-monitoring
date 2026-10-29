@@ -356,23 +356,28 @@ def test_add_watch_opens_linear_four_step_wizard_and_intl_deadline_defaults_unli
         {'from':'SHA','to':'JFK','date':'2026-12-18'},
         {'from':'JFK','to':'SHA','date':'2026-12-20'}]
     staged = page.evaluate("""() => {
-      const draft={from:'SHA',to:'JFK',from_name:'上海',to_name:'纽约',dates:['2026-12-17','2026-12-18'],alert_direct:500};
+      const draft={from:'SHA',to:'JFK',from_name:'上海',to_name:'纽约',dates:['2026-12-17','2026-12-18'],alert_direct:500,alert_transfer:500,transfer_arrival_max:'不限',transfer_layover_min:0,min_baggage:0,no_cross:false};
       const fresh={routes:[]},added=cfgWizardStageRoutes(fresh,draft,'2026-12-20');
       const freshSnapshot=JSON.stringify(fresh.routes);
-      cfgWizardRollbackRoutes(fresh,added);
       const merged={routes:[
         {from:'SHA',to:'JFK',ret_dates:[],dates:['2026-12-01']},
-        {from:'sha',to:'jfk',dates:['2026-12-17'],keep:'outbound'},
+        {from:'sha',to:'jfk',dates:['2026-12-17'],alert_direct:500,alert_transfer:500,transfer_arrival_max:'不限',transfer_layover_min:0,min_baggage:0,no_cross:false,keep:'outbound'},
+        {from:'SHA',to:'JFK',dates:['2026-12-05'],alert_direct:1000,alert_transfer:1000},
         {from:'JFK',to:'SHA',ret_date:'2026-12-30',dates:['2026-12-02']},
-        {from:'JFK',to:'SHA',dates:['2026-12-19'],keep:'return'}]};
-      const before=JSON.stringify(merged.routes),changes=cfgWizardStageRoutes(merged,draft,'2026-12-20');
-      const after=JSON.stringify(merged.routes);cfgWizardRollbackRoutes(merged,changes);
+        {from:'JFK',to:'SHA',dates:['2026-12-19'],alert_direct:500,alert_transfer:500,transfer_arrival_max:'不限',transfer_layover_min:0,min_baggage:0,no_cross:false,keep:'return'},
+        {from:'JFK',to:'SHA',dates:['2026-12-04'],enabled:false,alert_direct:500,alert_transfer:500,transfer_arrival_max:'不限',transfer_layover_min:0,min_baggage:0,no_cross:false,keep:'disabled'}]};
+      const changes=cfgWizardStageRoutes(merged,draft,'2026-12-20');
+      const incompatible={routes:[{from:'SHA',to:'JFK',dates:['2026-12-01'],alert_direct:1000,alert_transfer:1000}]};
+      const incompatibleChange=cfgWizardStageRoutes(incompatible,draft,'');
+      const disabled={routes:[{from:'SHA',to:'JFK',dates:['2026-12-01'],enabled:false,alert_direct:500,alert_transfer:500,transfer_arrival_max:'不限',transfer_layover_min:0,min_baggage:0,no_cross:false}]};
+      const disabledChange=cfgWizardStageRoutes(disabled,draft,'');
       return {fresh:freshSnapshot,added:added.added.length,restoredFresh:fresh.routes.length===0,
-        merged:after,mergedCount:changes.merged.length,addedCount:changes.added.length,
-        restored:JSON.stringify(merged.routes)===before};
+        merged:JSON.stringify(merged.routes),mergedCount:changes.merged.length,addedCount:changes.added.length,
+        incompatible:{dates:incompatible.routes[0].dates,added:incompatibleChange.added.length},
+        disabled:{enabled:disabled.routes[0].enabled,added:disabledChange.added.length}};
     }""")
     fresh_routes = __import__('json').loads(staged['fresh'])
-    assert staged['added'] == 2 and staged['restoredFresh']
+    assert staged['added'] == 2
     assert [(r['from'], r['to'], r['dates']) for r in fresh_routes] == [
         ('SHA', 'JFK', ['2026-12-17', '2026-12-18']),
         ('JFK', 'SHA', ['2026-12-20'])]
@@ -381,11 +386,33 @@ def test_add_watch_opens_linear_four_step_wizard_and_intl_deadline_defaults_unli
     assert staged['mergedCount'] == 2 and staged['addedCount'] == 0
     assert merged_routes[0]['dates'] == ['2026-12-01']  # round-trip stays separate
     assert merged_routes[1]['dates'] == ['2026-12-17', '2026-12-18']
-    assert merged_routes[3]['dates'] == ['2026-12-19', '2026-12-20']
-    assert staged['restored']
-    # An uncertain POST with no durable receipt must roll the provisional
-    # route back out of CFG while retaining the wizard draft. Repeated retry
-    # attempts therefore cannot append duplicate outbound/return routes.
+    assert merged_routes[1]['alert_direct'] == 500
+    assert merged_routes[2]['dates'] == ['2026-12-05']  # incompatible target untouched
+    assert merged_routes[4]['dates'] == ['2026-12-19', '2026-12-20']
+    assert merged_routes[5]['dates'] == ['2026-12-04']  # disabled route untouched
+    assert staged['incompatible'] == {'dates':['2026-12-01'],'added':1}
+    assert staged['disabled'] == {'enabled':False,'added':1}
+    concurrent = page.evaluate("""async() => {
+      const user=CFG.find(u=>u.name===cfgWatchName());
+      const route={from:'SHA',to:'JFK',dates:['2026-12-01'],alert_direct:500,alert_transfer:500,transfer_arrival_max:'不限',transfer_layover_min:0,min_baggage:0,no_cross:false};
+      user.routes.push(route);
+      Object.assign(CFG_WIZ,{open:true,step:4,from:'SHA',to:'JFK',fromName:'上海',toName:'纽约',dates:['2026-12-17'],returnDate:'',rows:[],selected:'',target:'500',strong:true});
+      let rejectPost;const savedFetch=window.fetch;
+      window.fetch=async url=>String(url)==='/api/config'?new Promise(resolve=>{rejectPost=resolve}):
+        {ok:true,status:200,json:async()=>({ok:true,saved:false})};
+      const saving=cfgWizardSave();await new Promise(resolve=>setTimeout(resolve,0));
+      const during=route.dates.slice();route.dates=['2026-12-11'];
+      rejectPost({ok:false,status:503,json:async()=>({ok:false,err:'network uncertain'})});
+      await saving;window.fetch=savedFetch;
+      const after=route.dates.slice();user.routes.splice(user.routes.indexOf(route),1);
+      return {during,after,open:CFG_WIZ.open};
+    }""")
+    assert concurrent['during'] == ['2026-12-01']
+    assert concurrent['after'] == ['2026-12-11']
+    assert concurrent['open']
+    # An uncertain POST with no durable receipt must leave live CFG untouched
+    # while retaining the wizard draft. Repeated retry attempts cannot append
+    # duplicate outbound/return routes before the server confirms a save.
     retry = page.evaluate("""async() => {
       const user=CFG.find(u=>u.name===cfgWatchName()), before=user.routes.length;
       Object.assign(CFG_WIZ,{open:true,step:4,from:'SHA',to:'JFK',

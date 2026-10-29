@@ -14314,21 +14314,32 @@ function cfgWizardAddDates(){
  for(let d=new Date(d0);d<=d1;d.setDate(d.getDate()+1)){add.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));if(add.length>max)break}
  CFG_WIZ.dates=[...new Set([...CFG_WIZ.dates,...add])].sort();if(CFG_WIZ.dates.length>max){CFG_WIZ.dates=CFG_WIZ.dates.slice(0,max);cfgWizardHint('最多关注 '+max+' 个出发日。')};cfgWatchRender();
 }
+function cfgWizardRouteCompatible(existing,route){
+ if(!existing||existing.enabled===false||existing.ret_dates!=null||String(existing.ret_date||'').trim())return false;
+ const defaults={alert_threshold:0,alert_direct:0,alert_transfer:0,transfer_arrival_max:'02:00',transfer_layover_min:0,transfer_layover_max:0,transfer_baggage:'',min_baggage:0,no_cross:false,direct_only:false,dep_time_min:'',dep_time_max:'',arr_time_min:'',arr_time_max:'',airlines:'',no_lcc:false,widebody_only:false,price_max:0,max_duration_h:0,exclude_stop:false,exclude_share:false};
+ for(const key of Object.keys(defaults)){
+  const a=Object.prototype.hasOwnProperty.call(existing,key)?existing[key]:defaults[key],b=Object.prototype.hasOwnProperty.call(route,key)?route[key]:defaults[key],d=defaults[key];
+  const av=typeof d==='number'?(Number(a)||0):(typeof d==='boolean'?!!a:String(a||''));
+  const bv=typeof d==='number'?(Number(b)||0):(typeof d==='boolean'?!!b:String(b||''));
+  if(av!==bv)return false;
+ }
+ return true;
+}
 function cfgWizardStageRoutes(user,route,returnDate){
  user.routes=user.routes||[];const changes={added:[],merged:[]};
  const legs=[route];
  if(returnDate){const back=Object.assign({},route,{from:route.to,to:route.from,from_name:route.to_name,to_name:route.from_name,dates:[returnDate]});legs.push(back)}
  for(const leg of legs){
   const from=String(leg.from||'').trim().toUpperCase(),to=String(leg.to||'').trim().toUpperCase();
-  const existing=user.routes.find(r=>String(r.from||'').trim().toUpperCase()===from&&String(r.to||'').trim().toUpperCase()===to&&r.ret_dates==null&&!String(r.ret_date||'').trim());
-  if(existing){const hadDates=Object.prototype.hasOwnProperty.call(existing,'dates');changes.merged.push({route:existing,hadDates,dates:hadDates&&Array.isArray(existing.dates)?existing.dates.slice():existing.dates});existing.dates=[...new Set([...(Array.isArray(existing.dates)?existing.dates:[]),...(leg.dates||[])])].sort()}
+  const existing=user.routes.find(r=>String(r.from||'').trim().toUpperCase()===from&&String(r.to||'').trim().toUpperCase()===to&&cfgWizardRouteCompatible(r,leg));
+  if(existing){changes.merged.push(existing);existing.dates=[...new Set([...(Array.isArray(existing.dates)?existing.dates:[]),...(leg.dates||[])])].sort()}
   else{const added=Object.assign({},leg);delete added.ret_date;delete added.ret_dates;user.routes.push(added);changes.added.push(added)}
  }
  return changes;
 }
-function cfgWizardRollbackRoutes(user,changes){
- for(const item of [...(changes.merged||[])].reverse()){if(item.hadDates)item.route.dates=item.dates;else delete item.route.dates}
- for(const route of [...(changes.added||[])].reverse()){const i=user.routes.indexOf(route);if(i>=0)user.routes.splice(i,1)}
+function cfgWizardApplyCommittedRoutes(baseCfg,sentCfg,userName,route,returnDate){
+ if(JSON.stringify(CFG)===baseCfg){CFG=JSON.parse(sentCfg);return}
+ const liveUser=CFG.find(u=>u.name===userName);if(liveUser)cfgWizardStageRoutes(liveUser,route,returnDate);
 }
 function cfgWizardPlans(){
  const plans=CFG_WIZ.dates.map(date=>({from:CFG_WIZ.from,to:CFG_WIZ.to,date}));
@@ -14357,20 +14368,21 @@ async function cfgWizardSave(){
  const intl=isIntlCode(CFG_WIZ.from)||isIntlCode(CFG_WIZ.to),target=Math.max(0,Number(($('cwzTarget')||{}).value)||0),strong=!!(($('cwzStrong')||{}).checked);
  CFG_WIZ.target=target?String(target):'';CFG_WIZ.strong=strong;
  const route={from:CFG_WIZ.from,to:CFG_WIZ.to,from_name:CFG_WIZ.fromName||CFG_WIZ.from,to_name:CFG_WIZ.toName||CFG_WIZ.to,dates,alert_direct:target,alert_transfer:target,transfer_arrival_max:intl?'不限':'02:00',transfer_layover_min:Number(($('cwzLay')||{}).value)||0,min_baggage:Number(($('cwzBag')||{}).value)||0,no_cross:!!(($('cwzNoCross')||{}).checked)};
- const routeChanges=cfgWizardStageRoutes(user,route,CFG_WIZ.returnDate);
+ const baseCfg=JSON.stringify(CFG),stagedUsers=JSON.parse(baseCfg),stagedUser=stagedUsers.find(u=>u.name===userName);
+ cfgWizardStageRoutes(stagedUser,route,CFG_WIZ.returnDate);
  const row=(CFG_WIZ.rows||[]).find((x,i)=>String(x.rowKey||x.id||i)===CFG_WIZ.selected);let wizardWatch=null;
  if(row){const plans=cfgWizardPlans();
   const plan=plans[Number(row.leg)||0]||plans[0];wizardWatch={from:plan.from,to:plan.to,date:plan.date,code:row.code||row.name,depTime:row.depTime,arrTime:row.arrTime,trans:row.transCity||'',cross:row.crossDayDesc||'',stop:!!row.stop,cabin:row.cabin||'',channels:CFG_WIZ.channels,target:target||null,active:true,notify:strong,note:''};}
  const saveBtn=document.querySelector('[data-cwzsave]');if(saveBtn)saveBtn.disabled=true;
  const txid=Array.from({length:4},()=>Math.floor(Math.random()*4294967296).toString(16).padStart(8,'0')).join('');
- const sentCfg=JSON.stringify(CFG),sentGlb=JSON.stringify(GLB),sentRevision=CFG_REVISION;
+ const sentCfg=JSON.stringify(stagedUsers),sentGlb=JSON.stringify(GLB),sentRevision=CFG_REVISION;
  const pending=fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({users:JSON.parse(sentCfg),globals:JSON.parse(sentGlb),revision:sentRevision,wizard_user:userName,wizard_watch:wizardWatch,wizard_txid:txid})});
  CFG_SAVE_FLIGHT=pending;
  try{const r=await pending;const j=await r.json();if(!r.ok||!j.ok){const err=new Error(j.err||'保存失败');err.status=r.status;throw err;}
+  cfgWizardApplyCommittedRoutes(baseCfg,sentCfg,userName,route,CFG_WIZ.returnDate);
   CFG_CLEAN=sentCfg;GLB_CLEAN=sentGlb;CFG_REVISION=j.revision||CFG_REVISION;CFG_WIZ.open=false;CFG_WATCH.loadedAt=0;CFG_WATCH.addOpen=false;cfgWatchRender();loadCfgWatch(true);toast(row?'航线和指定航班已开始关注':'航线已开始关注','ok');if(j.reload_warning)toast('已保存，但运行时热重载失败：'+j.reload_warning,'err');
  }catch(e){
   if(e && e.status>=400 && e.status<500){
-   cfgWizardRollbackRoutes(user,routeChanges)
    if(saveBtn)saveBtn.disabled=false;cfgWizardHint((e.message||'保存被拒绝')+'；请核对后重试。');
   }else{
    let receipt=null;
@@ -14379,8 +14391,8 @@ async function cfgWizardSave(){
     catch(_receiptError){}
     await new Promise(resolve=>setTimeout(resolve,250));
    }
-   if(receipt){CFG_CLEAN=sentCfg;GLB_CLEAN=sentGlb;CFG_REVISION=receipt.revision||CFG_REVISION;CFG_WIZ.open=false;CFG_WATCH.loadedAt=0;CFG_WATCH.addOpen=false;cfgWatchRender();loadCfgWatch(true);toast(row?'航线和指定航班已开始关注':'航线已开始关注','ok');if(receipt.reload_warning)toast('已保存，但运行时热重载失败：'+receipt.reload_warning,'err');}
-   else{cfgWizardRollbackRoutes(user,routeChanges);if(saveBtn)saveBtn.disabled=false;cfgWizardHint('保存状态暂时无法确认，已保留向导填写内容。请刷新查看是否已添加；如未添加，可再提交一次。');}
+   if(receipt){cfgWizardApplyCommittedRoutes(baseCfg,sentCfg,userName,route,CFG_WIZ.returnDate);CFG_CLEAN=sentCfg;GLB_CLEAN=sentGlb;CFG_REVISION=receipt.revision||CFG_REVISION;CFG_WIZ.open=false;CFG_WATCH.loadedAt=0;CFG_WATCH.addOpen=false;cfgWatchRender();loadCfgWatch(true);toast(row?'航线和指定航班已开始关注':'航线已开始关注','ok');if(receipt.reload_warning)toast('已保存，但运行时热重载失败：'+receipt.reload_warning,'err');}
+   else{if(saveBtn)saveBtn.disabled=false;cfgWizardHint('保存状态暂时无法确认，已保留向导填写内容。请刷新查看是否已添加；如未添加，可再提交一次。');}
   }
   if(e && e.status)console.warn('add-watch save response',e.status,e.message||'');
  }finally{if(CFG_SAVE_FLIGHT===pending)CFG_SAVE_FLIGHT=null;}
