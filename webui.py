@@ -9879,8 +9879,8 @@ function followRenderDetail(item){
   if(title)title.textContent=item.label;
   followEnsureConfig();
   const match=followConfigRoute(item),th=r.th||{},disabled=match?'':' disabled';
-  const revisionMismatch=!!(CFG_REVISION&&S&&S.config_revision&&S.config_revision!==CFG_REVISION);
-  if(meta)meta.innerHTML='日期 '+he(r.date||'未设置')+' · 直飞目标 ¥<input class="follow-target" aria-label="直飞目标价" type="number" min="0" step="10"'+disabled+' value="'+he(th.direct||0)+'" onchange="followSetRouteTarget(\''+he(item.id)+'\',\'alert_direct\',this.value)"> · 中转目标 ¥<input class="follow-target" aria-label="中转目标价" type="number" min="0" step="10"'+disabled+' value="'+he(th.transfer||0)+'" onchange="followSetRouteTarget(\''+he(item.id)+'\',\'alert_transfer\',this.value)">'+(match?'':(revisionMismatch?' · 配置已变化，请刷新后再修改':' · 配置未就绪或匹配不唯一，请到航线配置中修改'));
+  const revisionMismatch=!!(CFG_REVISION&&S&&S.config_revision&&S.config_revision!==CFG_REVISION),routesDirty=!!(u.name&&(CFG||[]).find(x=>x.name===u.name)&&!followCfgRoutesUnchanged((CFG||[]).find(x=>x.name===u.name)));
+  if(meta)meta.innerHTML='日期 '+he(r.date||'未设置')+' · 直飞目标 ¥<input class="follow-target" aria-label="直飞目标价" type="number" min="0" step="10"'+disabled+' value="'+he(th.direct||0)+'" onchange="followSetRouteTarget(\''+he(item.id)+'\',\'alert_direct\',this.value)"> · 中转目标 ¥<input class="follow-target" aria-label="中转目标价" type="number" min="0" step="10"'+disabled+' value="'+he(th.transfer||0)+'" onchange="followSetRouteTarget(\''+he(item.id)+'\',\'alert_transfer\',this.value)">'+(match?'':((revisionMismatch||routesDirty)?' · 配置已变化或航线尚未保存，请保存并刷新后再修改':' · 配置未就绪或匹配不唯一，请到航线配置中修改'));
   let st=CHR[u.name];if(typeof st==='number')st={i:st};st=st||{};st.i=item.index;st.r=(st.r==='48h'||st.r==='7d'||TREND_LONG[st.r])?st.r:'7d';CHR[u.name]=st;saveUI();
   const routeKey=String(r.label||'').replace(/\s+\d{2}[/]\d{2}\s*$/,'');
   FOLLOW_SCOPE={route:routeKey,date:String(r.date||'')};
@@ -9898,10 +9898,14 @@ function followRenderDetail(item){
  }
 }
 function followRouteIsRoundTrip(r){return !!((Array.isArray(r&&r.ret_dates)?r.ret_dates.length:r&&r.ret_dates)||String(r&&r.ret_date||'').trim())}
+function followCfgRoutesUnchanged(cfgUser){
+ try{const clean=JSON.parse(CFG_CLEAN||'null'),base=Array.isArray(clean)?clean.find(x=>x&&x.name===cfgUser.name):null;return !!base&&JSON.stringify(base.routes||[])===JSON.stringify(cfgUser.routes||[])}catch(e){return false}
+}
 function followConfigRoute(item){
  const user=(S&&S.users&&S.users[U])||{},cfgUser=(CFG||[]).find(x=>x.name===user.name);
  if(!cfgUser)return null;
  if(!CFG_REVISION||!S||!S.config_revision||S.config_revision!==CFG_REVISION)return null;
+ if(!followCfgRoutesUnchanged(cfgUser))return null;
  const row=(item&&item.route)||{},routes=cfgUser.routes||[],date=String(row.date||''),sourceIndex=Number(row.config_index),matches=routes.map((r,index)=>({r,index})).filter(x=>x.index===sourceIndex&&x.r.enabled!==false&&x.r.from===row.from&&x.r.to===row.to&&(x.r.dates||[]).includes(date));
  if(matches.length!==1)return null;
  const {r,index}=matches[0];
@@ -22889,21 +22893,30 @@ def _wizard_txn_recover_runtime(config_path):
     if not _wizard_txn_recover(config_path):
         return False
     _WATCH_CACHE.clear()
+    warning = ""
     try:
         with _STATE_LOCK:
+            if _State.reload_cb:
+                _State.reload_cb()
+                with open(config_path, "rb") as _recovered_config:
+                    _State.config_revision = hashlib.sha256(
+                        _recovered_config.read()).hexdigest()
             _STATE_CACHE["sig"] = None
             _STATE_CACHE["payload"] = None
             _STATE_CACHE["body"] = None
             _STATE_CACHE["etag"] = None
             _STATE_CACHE["gz"] = None
-    except NameError:
-        pass
-    warning = ""
-    try:
-        if _State.reload_cb:
-            _State.reload_cb()
     except Exception as exc:
         warning = str(exc)
+        try:
+            with _STATE_LOCK:
+                _STATE_CACHE["sig"] = None
+                _STATE_CACHE["payload"] = None
+                _STATE_CACHE["body"] = None
+                _STATE_CACHE["etag"] = None
+                _STATE_CACHE["gz"] = None
+        except NameError:
+            pass
         if _State.logger:
             _State.logger.exception("[向导恢复] 文件已恢复，但运行时热重载失败")
     if isinstance(receipt, dict) and receipt.get("txid"):
@@ -24827,11 +24840,19 @@ def _build_state(sig):
     etag/gz 原子成对（撕裂修复语义不变）。并发双构建无害：
     单飞旗标已挡重入，即便穿透也是先完成者先发布、后完成者整体覆盖。"""
     st = _State
-    users = st.users or [{"name": "default", "routes": st.cfg.get("routes") or []}]
+    # users/cfg/revision are one logical version. Hot reload replaces these
+    # references while holding the same lock, so never publish a mixed snapshot.
+    with _STATE_LOCK:
+        runtime_users = st.users
+        runtime_cfg_ref = st.cfg
+        runtime_cfg = runtime_cfg_ref or {}
+        config_revision = st.config_revision
+        version = st.version
+        users = runtime_users or [{"name": "default", "routes": runtime_cfg.get("routes") or []}]
     states = [_user_state(u) for u in users if u.get("routes")]
     # 更新时间取 DB 最新一条
     import sqlite3 as sq
-    db = _anchored((st.cfg.get("output") or {}).get("db_path"),
+    db = _anchored((runtime_cfg.get("output") or {}).get("db_path"),
                    "data/prices.db")
     updated = ""
     try:
@@ -24843,9 +24864,9 @@ def _build_state(sig):
     except Exception:
         pass
     out = {"updated": updated, "users": states,
-           "config_revision": st.config_revision,
-           "suspended": _suspended_users(users, st.cfg.get("users") or []),
-           "next_run": _next_run(), "version": st.version,
+           "config_revision": config_revision,
+           "suspended": _suspended_users(users, runtime_cfg.get("users") or []),
+           "next_run": _next_run(), "version": version,
            "demo": bool(DEMO["on"]),
            # 页脚「本地服务」实际监听地址（热切换/自定义 host 下页脚
            # 口径随实况；服务未起时留空）
@@ -24857,6 +24878,9 @@ def _build_state(sig):
     etag = ('"%s"' % hashlib.md5(body).hexdigest() if body else None)
     gz = (gzip.compress(body, 6) if body else None)
     with _STATE_LOCK:
+        if (st.config_revision != config_revision or st.users is not runtime_users
+                or st.cfg is not runtime_cfg_ref):
+            return  # a hot reload won; discard this obsolete build
         _STATE_CACHE["payload"] = out
         _STATE_CACHE["body"] = body
         _STATE_CACHE["etag"] = etag
@@ -26758,8 +26782,12 @@ class _Handler(BaseHTTPRequestHandler):
                         if _temp_path and os.path.exists(_temp_path):
                             os.unlink(_temp_path)
                 try:
-                    n = st.reload_cb() if st.reload_cb else 0
-                    _reload_warning = ""
+                    with _STATE_LOCK:
+                        n = st.reload_cb() if st.reload_cb else 0
+                        _reload_warning = ""
+                        if st.reload_cb:
+                            st.config_revision = _new_revision
+                        _STATE_CACHE["sig"] = None
                 except Exception as _reload_error:
                     # The durable files are already committed. Report success
                     # and the runtime reload issue separately to avoid a false
@@ -26767,8 +26795,6 @@ class _Handler(BaseHTTPRequestHandler):
                     n = 0
                     _reload_warning = str(_reload_error)
                     st.logger.exception("[web配置] 已保存，但运行时热重载失败")
-                if st.reload_cb and not _reload_warning:
-                    st.config_revision = _new_revision
                 if _wizard_txid:
                     _receipt["reload_warning"] = _reload_warning
                     _wizard_write_receipt(st.config_path, _receipt)

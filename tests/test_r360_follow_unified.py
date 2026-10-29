@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """r360: watches move into one route/flight list with one add flow."""
 import os
+import threading
 
 import webui
 from core.models import Route
@@ -70,9 +71,25 @@ def test_route_selection_and_target_edit_are_stable_and_unambiguous():
     assert "followRouteIsRoundTrip(r)!==Boolean(row.config_round_trip)" in match
     assert "if(followRouteIsRoundTrip(r))return null" in match
     assert "S.config_revision!==CFG_REVISION" in match
+    assert "followCfgRoutesUnchanged(cfgUser)" in match
+    assert "function followCfgRoutesUnchanged(cfgUser)" in SRC
+    assert "JSON.stringify(base.routes||[])===JSON.stringify(cfgUser.routes||[])" in SRC
+    assert "routesDirty" in SRC and "航线尚未保存" in SRC
     assert '"config_revision": st.config_revision' in SRC
-    assert 'if st.reload_cb and not _reload_warning:' in SRC
+    assert 'with _STATE_LOCK:\n                        n = st.reload_cb()' in SRC
+    main = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
+    assert 'with _STATE_LOCK:' in main[main.index('def reload_config():'):main.index('# 调度周期热更新', main.index('def reload_config():'))]
     assert '_STATE_SCHEMA = "probe-r365-2"' in SRC
+    state_builder = SRC[SRC.index("def _build_state(sig):"):SRC.index("def _state_rebuild_async():")]
+    assert "with _STATE_LOCK:" in state_builder
+    assert "runtime_users = st.users" in state_builder
+    assert "config_revision = st.config_revision" in state_builder
+    assert "st.users is not runtime_users" in state_builder
+    assert "st.config_revision != config_revision" in state_builder
+    recover = SRC[SRC.index("def _wizard_txn_recover_runtime(config_path):"):
+                  SRC.index("def _wizard_txn_commit(", SRC.index("def _wizard_txn_recover_runtime(config_path):"))]
+    assert "with _STATE_LOCK:" in recover
+    assert "_State.config_revision = hashlib.sha256" in recover
     state = SRC[SRC.index("def _user_state(u):"):SRC.index("\ndef _state_cache_path", SRC.index("def _user_state(u):"))]
     assert '_route["config_index"] = _config_index' in state
     assert '"config_round_trip": r.get("config_round_trip", False)' in state
@@ -109,6 +126,45 @@ def test_user_state_keeps_config_identity_for_route_objects_and_dicts(tmp_path):
     assert state["config_revision"] == "test-revision"
     assert [r["config_index"] for r in rows] == [1, 2]
     assert [r["config_round_trip"] for r in rows] == [False, True]
+
+
+def test_build_state_discards_snapshot_if_hot_reload_wins(monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+    old_users = [{"name": "old", "routes": [{"from": "SHA"}]}]
+    new_users = [{"name": "new", "routes": [{"from": "JFK"}]}]
+    old_cfg, new_cfg = {"output": {"db_path": "/missing/old.db"}}, {"output": {"db_path": "/missing/new.db"}}
+    monkeypatch.setattr(webui._State, "users", old_users)
+    monkeypatch.setattr(webui._State, "cfg", old_cfg)
+    monkeypatch.setattr(webui._State, "config_revision", "old-revision")
+    monkeypatch.setattr(webui._State, "version", "test")
+    def slow_user_state(user):
+        entered.set()
+        assert release.wait(3)
+        return {"name": user["name"], "routes": []}
+    monkeypatch.setattr(webui, "_user_state", slow_user_state)
+    monkeypatch.setattr(webui, "_suspended_users", lambda *_: [])
+    monkeypatch.setattr(webui, "_next_run", lambda: "")
+    monkeypatch.setattr(webui, "_state_persist", lambda *_: None)
+    cache = dict(webui._STATE_CACHE)
+    webui._STATE_CACHE.update({"sig": None, "payload": None, "body": None,
+                               "etag": None, "gz": None})
+    thread = threading.Thread(target=webui._build_state, args=(None,))
+    try:
+        thread.start()
+        assert entered.wait(3)
+        with webui._STATE_LOCK:
+            webui._State.users = new_users
+            webui._State.cfg = new_cfg
+            webui._State.config_revision = "new-revision"
+        release.set()
+        thread.join(3)
+        assert not thread.is_alive()
+        assert webui._STATE_CACHE["payload"] is None
+    finally:
+        release.set()
+        thread.join(3)
+        webui._STATE_CACHE.clear()
+        webui._STATE_CACHE.update(cache)
 
 
 def test_config_read_retry_is_single_flight_and_rate_limited():

@@ -2297,8 +2297,9 @@ def main():
         rt["special_force"] = True
         # 同步 webui 的内存引用（否则状态页仍用启动时的旧用户配置）
         try:
-            from webui import _State
-            _State.users, _State.cfg = rt["users"], cfg
+            from webui import _STATE_LOCK, _State
+            with _STATE_LOCK:
+                _State.users, _State.cfg = rt["users"], cfg
         except Exception:
             pass
         # 调度周期热更新：interval 变化时重排调度器（无需重启）

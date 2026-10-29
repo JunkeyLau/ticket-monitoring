@@ -274,6 +274,8 @@ def test_config_post_recovery_hot_reloads_before_revision_conflict(
     })
     assert status == 409 and conflict['conflict'] is True
     assert reloads == [1]
+    _, recovered_config = request(server, 'GET')
+    assert webui._State.config_revision == recovered_config['revision']
     status, receipt = request_path(server, 'GET',
         '/api/config/wizard-result?txid=' + txid)
     assert status == 200 and receipt['saved'] is True
@@ -312,6 +314,36 @@ def test_wizard_recovers_both_files_after_second_replace_failure(
         '/api/config/wizard-result?txid=' + txid)
     assert status == 200 and receipt['saved'] is True
     assert not (tmp_path / '.ticket-monitoring-wizard-transaction.json').exists()
+
+
+def test_runtime_recovery_refreshes_config_revision_and_invalidates_state(
+        tmp_path, monkeypatch):
+    import hashlib
+    import webui
+    path = tmp_path / 'config.yaml'
+    recovered = b'users:\n  - name: recovered\n'
+    path.write_bytes(recovered)
+    old_cache = dict(webui._STATE_CACHE)
+    old_users, old_cfg = webui._State.users, webui._State.cfg
+    monkeypatch.setattr(webui, '_wizard_txn_journal', lambda *_: str(tmp_path / 'journal.json'))
+    monkeypatch.setattr(webui, '_wizard_txn_recover', lambda *_: True)
+    monkeypatch.setattr(webui._State, 'config_revision', 'before-recovery')
+    def reload_runtime():
+        with webui._STATE_LOCK:
+            webui._State.users = [{'name': 'recovered', 'routes': []}]
+            webui._State.cfg = {'users': [{'name': 'recovered'}]}
+    monkeypatch.setattr(webui._State, 'reload_cb', reload_runtime)
+    webui._STATE_CACHE.update({'sig': 'stale', 'payload': {'stale': True},
+                               'body': b'stale', 'etag': 'stale', 'gz': b'stale'})
+    try:
+        assert webui._wizard_txn_recover_runtime(str(path)) is True
+        assert webui._State.config_revision == hashlib.sha256(recovered).hexdigest()
+        assert all(webui._STATE_CACHE[k] is None for k in ('sig', 'payload', 'body', 'etag', 'gz'))
+    finally:
+        with webui._STATE_LOCK:
+            webui._State.users, webui._State.cfg = old_users, old_cfg
+        webui._STATE_CACHE.clear()
+        webui._STATE_CACHE.update(old_cache)
 
 
 def test_wizard_reports_persisted_save_when_runtime_reload_fails(
