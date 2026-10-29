@@ -745,7 +745,7 @@ const RM=window.matchMedia&&window.matchMedia('(prefers-reduced-motion:reduce)')
  .follow-detail-head h3{margin:4px 0;font-size:17px}.follow-detail-head p{margin:0;color:var(--mut);font-size:11px}
  .follow-kind{font-size:10px;color:var(--blue);font-weight:700}
  .follow-target{width:72px;height:25px;padding:0 5px;border:1px solid var(--ctlbd);border-radius:5px;background:var(--card);color:var(--tx);font:inherit;font-size:11px}
- #followRouteChartHost{padding:10px}.follow-board #chartcard,#followRouteChartHost #calcard{margin:0 0 10px}
+ #followRouteChartHost{padding:10px}.follow-board #chartcard,#followRouteChartHost #calcard{margin:0 0 10px}.follow-board #wsEmptyHero{display:none!important}
  #followFlightDetail .wstudio{padding:0}.follow-board .ws-routebar,.follow-board .ws-roster{display:none!important}
  #followFlightDetail .ws-head-act [data-wsact="add"],#followFlightDetail .ws-head-act [data-wsact="search"]{display:none!important}
  @media(max-width:760px){.follow-layout{grid-template-columns:minmax(0,1fr)}#followRows{max-height:34vh}.follow-detail-head{align-items:flex-start;flex-direction:column}}
@@ -9834,13 +9834,13 @@ function followMount(){
  if(rh&&route&&route.parentNode!==rh)rh.appendChild(route);
  if(fh&&details&&details.parentNode!==fh)fh.appendChild(details);
  if(fd&&studio&&studio.parentNode!==fd)fd.appendChild(studio);
- if(route)route.style.display='none';if(details)details.style.display='none';
 }
 function followItems(){
  const user=(S&&S.users&&S.users[U])||null;
  const routes=(user&&user.routesArr)||[];
  const watches=window._monWatches||[];
- return routes.map((r,i)=>{const routeLabel=String(r.label||((r.from_name||r.from||'—')+'→'+(r.to_name||r.to||'—'))).replace(/\s+\d{2}[/]\d{2}\s*$/,'');return {kind:'route',id:String(i),route:r,label:routeLabel+(r.date?' · '+r.date:''),meta:'航线走势 · '+(r.date||'日期未设置')}})
+ const userName=String(user&&user.name||'');
+ return routes.map((r,i)=>{const routeLabel=String(r.label||((r.from_name||r.from||'—')+'→'+(r.to_name||r.to||'—'))).replace(/\s+\d{2}[/]\d{2}\s*$/,'');const id=[userName,r.from||'',r.to||'',r.date||''].map(encodeURIComponent).join('|');return {kind:'route',id, index:i,route:r,label:routeLabel+(r.date?' · '+r.date:''),meta:'航线走势 · '+(r.date||'日期未设置')}})
   .concat(watches.map(w=>({kind:'watch',id:String(w.id||''),watch:w,label:(w.code||'航班')+' · '+srxPairName(w.from,w.to),meta:(w.date||'')+' · '+(w.active===false?'已暂停':'目标 '+(w.target==null?'未设':'¥'+w.target))})))
   .filter(x=>x.kind==='route'||x.id);
 }
@@ -9853,16 +9853,19 @@ function followRenderList(){
  if(!shown.length){box.innerHTML='<div class="follow-empty">没有匹配的关注。</div>';return}
  if(!FOLLOW_SELECTION||!all.some(x=>x.kind+':'+x.id===FOLLOW_SELECTION)){
   try{FOLLOW_SELECTION=localStorage.getItem('jpfollowselection')||''}catch(e){}
+  const oldIndex=FOLLOW_SELECTION.match(/^route:(\d+)$/);if(oldIndex){const old=all.find(x=>x.kind==='route'&&x.index===Number(oldIndex[1]));if(old)FOLLOW_SELECTION='route:'+old.id;}
   if(!all.some(x=>x.kind+':'+x.id===FOLLOW_SELECTION))FOLLOW_SELECTION=all[0].kind+':'+all[0].id;
  }
  box.innerHTML=shown.map(x=>{const key=x.kind+':'+x.id;return '<button type="button" class="follow-row'+(key===FOLLOW_SELECTION?' on':'')+'" role="option" aria-selected="'+(key===FOLLOW_SELECTION?'true':'false')+'" data-follow-kind="'+x.kind+'" data-follow-id="'+he(x.id)+'"><span class="follow-badge">'+(x.kind==='route'?'航线':'航班')+'</span><span class="follow-row-copy"><b>'+he(x.label)+'</b><span>'+he(x.meta)+'</span></span></button>'}).join('');
  if(!shown.some(x=>x.kind+':'+x.id===FOLLOW_SELECTION)){FOLLOW_RENDERED='';followRenderDetail(null)}
- else if(FOLLOW_RENDERED!==FOLLOW_SELECTION){FOLLOW_RENDERED=FOLLOW_SELECTION;followRenderDetail(all.find(x=>x.kind+':'+x.id===FOLLOW_SELECTION)||null)}
+ else {const selected=all.find(x=>x.kind+':'+x.id===FOLLOW_SELECTION)||null;const sig=selected?followItemSignature(selected):'';if(FOLLOW_RENDERED!==sig){FOLLOW_RENDERED=sig;followRenderDetail(selected)}}
 }
 function followSelect(kind,id){
+ if(kind==='route'&&/^\d+$/.test(String(id))){const old=followItems().find(x=>x.kind==='route'&&x.index===Number(id));if(old)id=old.id}
  FOLLOW_SELECTION=kind+':'+id;try{localStorage.setItem('jpfollowselection',FOLLOW_SELECTION)}catch(e){}
  FOLLOW_RENDERED='';followRenderList();
 }
+function followItemSignature(item){const u=(S&&S.users&&S.users[U])||{},r=item.route||{},w=item.watch||{};return JSON.stringify([u.name,item.kind,item.id,item.index,r.from,r.to,r.date,r.th,w.id,w.date,w.target,w.channels,w.active,w.notify])}
 function followRenderDetail(item){
  followMount();const empty=$('followDetailEmpty'),rd=$('followRouteDetail'),fd=$('followFlightDetail');
  if(!item){if(empty)empty.hidden=false;if(rd)rd.hidden=true;if(fd)fd.hidden=true;return}
@@ -9872,9 +9875,10 @@ function followRenderDetail(item){
   const title=$('followRouteTitle'),meta=$('followRouteMeta');
   const r=item.route||{},u=(S&&S.users&&S.users[U])||{};
   if(title)title.textContent=item.label;
-  const th=r.th||{};
-  if(meta)meta.innerHTML='日期 '+he(r.date||'未设置')+' · 直飞目标 ¥<input class="follow-target" aria-label="直飞目标价" type="number" min="0" step="10" value="'+he(th.direct||0)+'" onchange="followSetRouteTarget(\''+he(item.id)+'\',\'alert_direct\',this.value)"> · 中转目标 ¥<input class="follow-target" aria-label="中转目标价" type="number" min="0" step="10" value="'+he(th.transfer||0)+'" onchange="followSetRouteTarget(\''+he(item.id)+'\',\'alert_transfer\',this.value)">';
-  let st=CHR[u.name];if(typeof st==='number')st={i:st};st=st||{};st.i=+item.id||0;st.r=(st.r==='48h'||st.r==='7d'||TREND_LONG[st.r])?st.r:'7d';CHR[u.name]=st;saveUI();
+  if(!CFG)loadCfg().then(()=>{FOLLOW_RENDERED='';followRenderList()}).catch(()=>{});
+  const match=followConfigRoute(item),th=r.th||{},disabled=match?'':' disabled';
+  if(meta)meta.innerHTML='日期 '+he(r.date||'未设置')+' · 直飞目标 ¥<input class="follow-target" aria-label="直飞目标价" type="number" min="0" step="10"'+disabled+' value="'+he(th.direct||0)+'" onchange="followSetRouteTarget(\''+he(item.id)+'\',\'alert_direct\',this.value)"> · 中转目标 ¥<input class="follow-target" aria-label="中转目标价" type="number" min="0" step="10"'+disabled+' value="'+he(th.transfer||0)+'" onchange="followSetRouteTarget(\''+he(item.id)+'\',\'alert_transfer\',this.value)">'+(match?'':' · 配置匹配不唯一，请到航线配置中修改');
+  let st=CHR[u.name];if(typeof st==='number')st={i:st};st=st||{};st.i=item.index;st.r=(st.r==='48h'||st.r==='7d'||TREND_LONG[st.r])?st.r:'7d';CHR[u.name]=st;saveUI();
   FLT.routes=new Set([String(r.label||'').replace(/\s+\d{2}[/]\d{2}\s*$/,'')]);
   FLT.dates=r.date?new Set([r.date]):new Set();
   buildRouteChips();buildDateChips();
@@ -9893,8 +9897,9 @@ function followConfigRoute(item){
  const user=(S&&S.users&&S.users[U])||{},cfgUser=(CFG||[]).find(x=>x.name===user.name);
  if(!cfgUser)return null;
  const row=(item&&item.route)||{},routes=cfgUser.routes||[],date=String(row.date||'');
- const index=routes.findIndex(r=>r.from===row.from&&r.to===row.to&&(!date||(r.dates||[]).includes(date)));
- return index<0?null:{index,route:routes[index],user:cfgUser,ui:(CFG||[]).indexOf(cfgUser)};
+ const matches=routes.map((r,index)=>({r,index})).filter(x=>x.r.enabled!==false&&!x.r.ret_dates&&!String(x.r.ret_date||'').trim()&&x.r.from===row.from&&x.r.to===row.to&&(!date||(x.r.dates||[]).includes(date)));
+ if(matches.length!==1)return null;
+ const {r,index}=matches[0];return {index,route:r,user:cfgUser,ui:(CFG||[]).indexOf(cfgUser)};
 }
 function followEditRoute(){switchView('cfg');showCfgPanel('users');toast('已打开航线条件配置；修改会沿用配置自动保存与版本冲突处理','')}
 async function followSetRouteTarget(routeIndex,key,value){
@@ -10703,10 +10708,10 @@ async function wsToggleNotify(w){
 }
 async function wsRemoveWatch(w){
  if(!w)return;if(w.preview){wsExitPreview();return}
- if(WS.confirm!==w.id){WS.confirm=w.id;wsRenderList();clearTimeout(WS._ct);WS._ct=setTimeout(()=>{if(WS.confirm===w.id){WS.confirm='';wsRenderList()}},4200);return}
+ if(WS.confirm!==w.id){WS.confirm=w.id;wsRenderList();wsRenderFocus();clearTimeout(WS._ct);WS._ct=setTimeout(()=>{if(WS.confirm===w.id){WS.confirm='';wsRenderList();wsRenderFocus()}},4200);return}
  WS.confirm='';
  try{const j=await wsPost({op:'remove',id:w.id});WS.list=j.watches||WS.list.filter(x=>x.id!==w.id);window._monWatches=WS.list;delete WS.trends[w.id];if(WS.focus===w.id)WS.focus='';FOLLOW_RENDERED='';wsRenderAfterTrends();followRenderList();setTimeout(()=>{const b=document.querySelector('#followAdd');if(b)b.focus({preventScroll:true})},0);toast('已移除 '+(w.code||''),'ok')}
- catch(e){toast(String(e&&e.message||e),'err')}
+ catch(e){toast(String(e&&e.message||e),'err');wsRenderFocus()}
 }
 function wsLocate(w){if(!w)return;switchView('search');setTimeout(()=>{if(VIEW!=='search')return;if(typeof srxWatchLocate==='function')srxWatchLocate(w);else toast('检索台尚未就绪','err')},350)}
 function wsEdit(w){if(!w)return;if(w.preview){wsAddPreview();return}switchView('cfg');showCfgPanel('watch');setTimeout(()=>{

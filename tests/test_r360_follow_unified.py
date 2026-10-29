@@ -26,11 +26,13 @@ def test_follow_board_combines_route_and_flight_rows_and_details():
     assert "appendChild(route)" in SRC
     assert "appendChild(details)" in SRC
     assert "appendChild(studio)" in SRC
+    mount = SRC[SRC.index("function followMount()"):SRC.index("function followItems()")]
+    assert "style.display='none'" not in mount
 
 
 def test_follow_edits_reuse_existing_save_paths_and_add_wizard():
     assert "setRoute(match.ui,match.index,key,v)" in SRC
-    assert "r.from===row.from&&r.to===row.to&&(!date||(r.dates||[]).includes(date))" in SRC
+    assert "x.r.from===row.from&&x.r.to===row.to&&(!date||(x.r.dates||[]).includes(date))" in SRC
     assert "wsPost({op:'update',id,patch:{target}})" in SRC
     assert "wsPost({op:'update',id,patch:{channels:[...channels]}})" in SRC
     assert "function followAdd()" in SRC and "cfgWatchWizardOpen()" in SRC
@@ -47,6 +49,24 @@ def test_route_details_filter_to_the_selected_route_and_date():
     assert "FLT.routes=new Set([String(r.label||'').replace" in detail
     assert "FLT.dates=r.date?new Set([r.date]):new Set()" in detail
     assert "buildRouteChips();buildDateChips();" in detail
+
+
+def test_route_selection_and_target_edit_are_stable_and_unambiguous():
+    items = SRC[SRC.index("function followItems()"):SRC.index("function followRenderList()")]
+    assert "[userName,r.from||'',r.to||'',r.date||''].map(encodeURIComponent).join('|')" in items
+    assert "function followItemSignature(item)" in SRC
+    match = SRC[SRC.index("function followConfigRoute(item)"):
+                SRC.index("function followEditRoute()")]
+    assert "x.r.enabled!==false" in match
+    assert "!x.r.ret_dates&&!String(x.r.ret_date||'').trim()" in match
+    assert "if(matches.length!==1)return null" in match
+
+
+def test_remove_confirmation_refreshes_visible_detail_button():
+    remove = SRC[SRC.index("async function wsRemoveWatch(w)"):
+                 SRC.index("function wsLocate(w)")]
+    assert "WS.confirm=w.id;wsRenderList();wsRenderFocus()" in remove
+    assert "WS.confirm='';wsRenderList();wsRenderFocus()" in remove
 
 
 def test_legacy_watch_tabs_redirect_and_success_returns_to_unified_list():
