@@ -9841,7 +9841,7 @@ function followItems(){
  const routes=(user&&user.routesArr)||[];
  const watches=window._monWatches||[];
  const userName=String(user&&user.name||'');
- return routes.map((r,i)=>{const routeLabel=String(r.label||((r.from_name||r.from||'—')+'→'+(r.to_name||r.to||'—'))).replace(/\s+\d{2}[/]\d{2}\s*$/,'');const id=[userName,r.from||'',r.to||'',r.date||''].map(encodeURIComponent).join('|');return {kind:'route',id,index:i,route:r,label:routeLabel+(r.date?' · '+r.date:''),meta:'航线走势 · '+(r.date||'日期未设置')}})
+ return routes.map((r,i)=>{const routeLabel=String(r.label||((r.from_name||r.from||'—')+'→'+(r.to_name||r.to||'—'))).replace(/\s+\d{2}[/]\d{2}\s*$/,'');const trip=r.config_round_trip?'往返':'单程';const configIndex=r.config_index==null?i:r.config_index;const id=[userName,r.from||'',r.to||'',r.date||'',String(configIndex),trip].map(encodeURIComponent).join('|');return {kind:'route',id,index:i,route:r,label:routeLabel+' · '+trip+(r.date?' · '+r.date:''),meta:'航线走势 · '+trip+' · '+(r.date||'日期未设置')}})
   .concat(watches.map(w=>({kind:'watch',id:String(w.id||''),watch:w,label:(w.code||'航班')+' · '+srxPairName(w.from,w.to),meta:(w.date||'')+' · '+(w.active===false?'已暂停':'目标 '+(w.target==null?'未设':'¥'+w.target))})))
   .filter(x=>x.kind==='route'||x.id);
 }
@@ -9899,9 +9899,10 @@ function followRenderDetail(item){
 function followConfigRoute(item){
  const user=(S&&S.users&&S.users[U])||{},cfgUser=(CFG||[]).find(x=>x.name===user.name);
  if(!cfgUser)return null;
- const row=(item&&item.route)||{},routes=cfgUser.routes||[],date=String(row.date||''),matches=routes.map((r,index)=>({r,index})).filter(x=>x.r.enabled!==false&&x.r.from===row.from&&x.r.to===row.to&&(x.r.dates||[]).includes(date));
+ const row=(item&&item.route)||{},routes=cfgUser.routes||[],date=String(row.date||''),sourceIndex=Number(row.config_index),matches=routes.map((r,index)=>({r,index})).filter(x=>x.index===sourceIndex&&x.r.enabled!==false&&x.r.from===row.from&&x.r.to===row.to&&(x.r.dates||[]).includes(date));
  if(matches.length!==1)return null;
  const {r,index}=matches[0];
+ if(Boolean(r.ret_dates!=null||String(r.ret_date||'').trim())!==Boolean(row.config_round_trip))return null;
  if(r.ret_dates!=null||String(r.ret_date||'').trim())return null;
  return {index,route:r,user:cfgUser,ui:(CFG||[]).indexOf(cfgUser)};
 }
@@ -23847,8 +23848,16 @@ def _user_state(u):
         if isinstance(r, dict):
             return r.get("enabled") is not False
         return getattr(r, "enabled", True) is not False
-    routes = [_route_view(r) for r in (u.get("routes") or [])
-              if _enabled(r)]
+    routes = []
+    for _config_index, _raw_route in enumerate(u.get("routes") or []):
+        if not _enabled(_raw_route):
+            continue
+        _route = _route_view(_raw_route)
+        _route["config_index"] = _config_index
+        _route["config_round_trip"] = bool(
+            _raw_route.get("ret_dates") is not None
+            or str(_raw_route.get("ret_date") or "").strip())
+        routes.append(_route)
     # 出发时段约束（与告警链路同一套窗口；按 航线+日期 粒度，
     # 同航线不同日期可有不同窗口，如返程 10-4 仅晚间 / 10-5 全天）
     win = {}
@@ -24516,13 +24525,10 @@ def _user_state(u):
     h_d = _pts(hist, 1, th_d)
     h_t = _pts(hist, 2, th_t)
     # 多航线走势：每 (航线,日期) 一条序列，前端图上切着看（必须画全部，不许只画第一条）
-    routes_arr, seen_rd = [], set()
+    routes_arr = []
     for r in routes:
         am_r = _route_arrival_max(r)
         for d0 in r.get("dates") or [""]:
-            if (r["from"], r["to"], d0) in seen_rd:
-                continue
-            seen_rd.add((r["from"], r["to"], d0))
             try:
                 hist_r = _rounds(db, r["from"], r["to"], d0, am_r,
                                  layover_min=int(r.get("transfer_layover_min", 0) or 0),
@@ -24559,6 +24565,8 @@ def _user_state(u):
                          + (f" {short}" if short else ""),
                 "from": r["from"], "to": r["to"],
                 "date": d0,
+                "config_index": r.get("config_index"),
+                "config_round_trip": r.get("config_round_trip", False),
                 "th": {"direct": float(r.get("alert_direct", 0) or 0),
                        "transfer": float(r.get("alert_transfer", 0) or 0)},
                 "history": {"direct": rd, "transfer": rt_},

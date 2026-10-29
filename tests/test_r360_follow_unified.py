@@ -55,13 +55,21 @@ def test_route_details_filter_to_the_selected_route_and_date():
 
 def test_route_selection_and_target_edit_are_stable_and_unambiguous():
     items = SRC[SRC.index("function followItems()"):SRC.index("function followRenderList()")]
-    assert "[userName,r.from||'',r.to||'',r.date||''].map(encodeURIComponent).join('|')" in items
+    assert "const configIndex=r.config_index==null?i:r.config_index" in items
+    assert "String(configIndex),trip].map(encodeURIComponent).join('|')" in items
+    assert "label:routeLabel+' · '+trip" in items
     assert "function followItemSignature(item)" in SRC
     match = SRC[SRC.index("function followConfigRoute(item)"):
                 SRC.index("function followEditRoute()")]
-    assert "x.r.enabled!==false&&x.r.from===row.from" in match
+    assert "x.index===sourceIndex&&x.r.enabled!==false&&x.r.from===row.from" in match
     assert "if(matches.length!==1)return null" in match
+    assert "Boolean(r.ret_dates!=null||String(r.ret_date||'').trim())!==Boolean(row.config_round_trip)" in match
     assert "if(r.ret_dates!=null||String(r.ret_date||'').trim())return null" in match
+    state = SRC[SRC.index("def _user_state(u):"):SRC.index("\ndef _state_cache_path", SRC.index("def _user_state(u):"))]
+    assert '_route["config_index"] = _config_index' in state
+    assert '"config_round_trip": r.get("config_round_trip", False)' in state
+    assert "routes_arr = []" in state
+    assert "seen_rd" not in state
 
 
 def test_config_read_retry_is_single_flight_and_rate_limited():
