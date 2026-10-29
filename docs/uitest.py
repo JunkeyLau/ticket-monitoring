@@ -5977,22 +5977,33 @@ def main():
             pg.wait_for_timeout(300)
 
             # ===== r354 UI 质量回归门（按缺陷出现的视口钉死） =====
-            # 1) 分区编号在当前关注对象的单个详情面板内唯一。
+            # 1) 分区编号在当前关注对象的详情内唯一；无嵌套 tabpanel 时
+            # 以可见详情根作为一个面板，空详情不能通过。
+            pg.evaluate("showMonTab('watch')")
+            pg.wait_for_timeout(300)
             _dupn = []
             for _kind in ("route", "watch"):
-                pg.evaluate("""kind=>{const row=document.querySelector(
+                _selected = pg.evaluate("""kind=>{const row=document.querySelector(
                   '#followRows [data-follow-kind="'+kind+'"]');
-                  if(row)followSelect(kind,row.dataset.followId)}""", _kind)
+                  if(!row)return false;
+                  followSelect(kind,row.dataset.followId);return true;}""", _kind)
                 pg.wait_for_timeout(350)
-                _nos = pg.evaluate("""kind=>{const root=document.querySelector(
+                _detail_scan = pg.evaluate("""kind=>{const root=document.querySelector(
                   kind==='route'?'#followRouteDetail':'#followFlightDetail');
-                  if(!root||root.hidden)return [];
-                  return [...root.querySelectorAll('[role=tabpanel]')]
-                    .filter(p=>p.offsetParent!==null)
-                    .map(p=>[...p.querySelectorAll('.seclab .no')]
-                      .map(x=>x.textContent.trim()));}""", _kind)
-                if any(len(_panel) != len(set(_panel)) for _panel in _nos):
-                    _dupn.append((_kind, _nos))
+                  const visible=e=>!!e&&!e.hidden&&e.getClientRects().length>0
+                    &&getComputedStyle(e).visibility!=='hidden';
+                  const nested=root?[...root.querySelectorAll('[role=tabpanel]')]
+                    .filter(visible):[];
+                  const panels=nested.length?nested:(visible(root)?[root]:[]);
+                  const nums=panels.flatMap(p=>[...p.querySelectorAll('.seclab .no')]
+                    .filter(visible).map(x=>x.textContent.trim()));
+                  return {visible:visible(root),panels:panels.length,nums};}""", _kind)
+                _nums = _detail_scan["nums"]
+                if (not _selected or not _detail_scan["visible"]
+                        or not _detail_scan["panels"]
+                        or not _nums
+                        or len(_nums) != len(set(_nums))):
+                    _dupn.append((_kind, _detail_scan))
             ck("r354 分区编号单页唯一", not _dupn, str(_dupn[:2]))
             # 2) 关注台无 <10px 文字（旧 8px 标签）
             pg.evaluate("showMonTab('watch')")
@@ -6830,22 +6841,80 @@ def main():
               flightCount:document.querySelectorAll('#followRows [data-follow-kind=watch]').length})""")
             ck("goal 航线与指定航班在同一关注清单", _u["board"]
                and _u["routeCount"] > 0 and _u["flightCount"] > 0, str(_u))
-            pg.evaluate("followSelect('route',document.querySelector('#followRows [data-follow-kind=route]').dataset.followId)")
-            pg.wait_for_timeout(500)
-            _route_detail = pg.evaluate("""()=>({
-              visible:!document.querySelector('#followRouteDetail').hidden,
-              chart:!!document.querySelector('#followRouteChartHost #chartcard'),
-              flights:!!document.querySelector('#followRouteFlightsHost #montab-details')})""")
-            ck("goal 航线详情内含走势与当日明细", _route_detail["visible"]
-               and _route_detail["chart"] and _route_detail["flights"], str(_route_detail))
-            pg.evaluate("followSelect('watch',document.querySelector('#followRows [data-follow-kind=watch]').dataset.followId)")
+            _route_detail = pg.evaluate("""()=>{
+              const items=followItems().filter(x=>x.kind==='route');
+              let best=null,n=-1;
+              for(const x of items){followSelect('route',x.id);
+                const c=filteredRows().length;if(c>n){best=x;n=c}}
+              if(!best||n<1)return {selected:false,rows:n};
+              followSelect('route',best.id);table();
+              const root=document.getElementById('followRouteDetail'),
+                chart=document.querySelector('#followRouteChartHost #chartcard'),
+                canvas=document.querySelector('#followRouteChartHost #chart'),
+                detail=document.querySelector('#followRouteFlightsHost #montab-details'),
+                row=document.querySelector('#followRouteFlightsHost #ftable tbody tr[data-k]'),
+                user=S.users[U],state=CHR[user.name]||{},
+                current=curRoute(),scope=FOLLOW_SCOPE;
+              const visible=e=>!!e&&!e.hidden&&e.getClientRects().length>0
+                &&getComputedStyle(e).visibility!=='hidden';
+              const selected=FOLLOW_SELECTION==='route:'+best.id
+                  &&state.i===best.index&&current.r
+                  &&current.r.from===best.route.from
+                  &&current.r.to===best.route.to
+                  &&current.r.date===best.route.date;
+              return {selected,
+                visible:visible(root),chart:visible(chart),
+                plot:visible(canvas)&&canvas.clientWidth>0&&canvas.clientHeight>0,
+                flights:visible(detail),row:visible(row),rows:n,
+                scoped:!!scope&&filteredRows().length===n
+                  &&filteredRows().every(f=>f.route===scope.route
+                    &&(!scope.date||f.date===scope.date)),
+                title:document.getElementById('chartTitle').textContent,
+                selection:FOLLOW_SELECTION,expected:'route:'+best.id,
+                route:[current.r.from,current.r.to,current.r.date],
+                expectedRoute:[best.route.from,best.route.to,best.route.date],
+                index:state.i,expectedIndex:best.index};}""")
+            ck("goal 航线详情呈现所选对象的走势与当日航班",
+               _route_detail["selected"] and _route_detail["visible"]
+               and _route_detail["chart"] and _route_detail["plot"]
+               and _route_detail["flights"] and _route_detail["row"]
+               and _route_detail["scoped"], str(_route_detail))
+            pg.evaluate("""()=>{const id=document.querySelector(
+              '#followRows [data-follow-kind=watch]')?.dataset.followId;
+              if(id)followSelect('watch',id)}""")
             pg.wait_for_timeout(900)
-            _flight_detail = pg.evaluate("""()=>({
-              visible:!document.querySelector('#followFlightDetail').hidden,
-              studio:document.querySelector('#watchStudio').parentElement.id==='followFlightDetail',
-              chart:!!document.querySelector('#followFlightDetail #wsChart')})""")
-            ck("goal 指定航班详情复用走势与提醒控件", _flight_detail["visible"]
-               and _flight_detail["studio"] and _flight_detail["chart"], str(_flight_detail))
+            _flight_detail = pg.evaluate("""()=>{
+              const row=document.querySelector(
+                '#followRows [data-follow-kind=watch]'),
+                id=row&&row.dataset.followId,
+                root=document.getElementById('followFlightDetail'),
+                studio=document.getElementById('watchStudio'),
+                canvas=document.getElementById('wsChart');
+              const visible=e=>!!e&&!e.hidden&&e.getClientRects().length>0
+                &&getComputedStyle(e).visibility!=='hidden';
+              const snap=()=>({selected:!!id&&FOLLOW_SELECTION==='watch:'+id
+                  &&WS.focus===id&&!!wsWatchById(id),
+                visible:visible(root)&&visible(studio),
+                chart:visible(canvas)&&canvas.clientWidth>0&&canvas.clientHeight>0,
+                empty:visible(document.getElementById('wsChartEmpty')),
+                title:document.getElementById('wsChartTitle')?.textContent||''});
+              return snap();}""")
+            ck("goal 指定航班详情及走势实际可见", _flight_detail["selected"]
+               and _flight_detail["visible"] and _flight_detail["chart"], str(_flight_detail))
+            pg.evaluate("wsRenderAfterTrends()")
+            pg.wait_for_timeout(300)
+            _flight_poll = pg.evaluate("""()=>{
+              const root=document.getElementById('followFlightDetail'),
+                studio=document.getElementById('watchStudio'),
+                canvas=document.getElementById('wsChart');
+              const visible=e=>!!e&&!e.hidden&&e.getClientRects().length>0
+                &&getComputedStyle(e).visibility!=='hidden';
+              return {selected:FOLLOW_SELECTION==='watch:'+WS.focus&&!!wsWatchById(WS.focus),
+                visible:visible(root)&&visible(studio),
+                chart:visible(canvas)&&canvas.clientWidth>0&&canvas.clientHeight>0};}""")
+            ck("goal 航班详情轮询后仍保持可见",
+               _flight_poll["selected"] and _flight_poll["visible"]
+               and _flight_poll["chart"], str(_flight_poll))
             pg.evaluate("switchView('search')")
             pg.wait_for_timeout(1200)
             pg.evaluate("document.querySelector('#srxFilterBtn').click()")

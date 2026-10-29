@@ -7548,7 +7548,7 @@ html[data-theme="dark"] #opscard .opsbtns>button:first-child{color:#0b1220!impor
 </div><!-- /montab-watch -->
 
 <div id="montab-details" role="tabpanel" style="display:none">
-<div class="ucard" id="tablecard"><div class="uhead"><span style="display:flex;align-items:center;gap:9px;flex-wrap:wrap"><span class="seclab inline"><span class="no">01</span><span class="zh">航班明细</span><span class="en">DETAILS</span></span></span>
+<div class="ucard" id="tablecard"><div class="uhead"><span style="display:flex;align-items:center;gap:9px;flex-wrap:wrap"><span class="seclab inline"><span class="no">03</span><span class="zh">航班明细</span><span class="en">DETAILS</span></span></span>
  <span class="muted" id="fcnt" style="font-family:var(--num)"></span></div><div class="tabs" id="tabs">
   <span data-f="all" class="on">全部</span><span data-f="d"><svg class="ic" aria-hidden="true"><use href="#i-plane"></use></svg> 直飞</span>
   <span data-f="tq"><svg class="ic" aria-hidden="true"><use href="#i-swap"></use></svg> 中转·达标</span><span data-f="t"><svg class="ic" aria-hidden="true"><use href="#i-swap"></use></svg> 中转·全部</span>
