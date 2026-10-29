@@ -6879,10 +6879,12 @@ def main():
                and _route_detail["chart"] and _route_detail["plot"]
                and _route_detail["flights"] and _route_detail["row"]
                and _route_detail["scoped"], str(_route_detail))
-            # 模拟关注列表轮询刷新：列表重绘后，已选航线的走势图与当日明细仍须可见。
-            pg.evaluate("""()=>{FOLLOW_RENDERED='';followRenderList()}""")
+            # 走真实关注数据刷新路径；不清重绘签名，覆盖正常轮询的同签名分支。
+            _route_rendered = pg.evaluate("FOLLOW_RENDERED")
+            pg.evaluate("renderMonWatch(true)")
             pg.wait_for_timeout(250)
-            _route_refresh = pg.evaluate("""id=>{
+            _route_refresh = pg.evaluate("""args=>{
+              const {id,rendered}=args;
               const item=followItems().find(x=>x.kind==='route'&&x.id===id),
                 root=document.getElementById('followRouteDetail'),
                 chart=document.querySelector('#followRouteChartHost #chartcard'),
@@ -6903,14 +6905,17 @@ def main():
                 scoped:!!scope&&rows.length>0
                   &&rows.every(f=>f.route===scope.route
                     &&(!scope.date||f.date===scope.date)),
+                sameSignature:FOLLOW_RENDERED===rendered,
                 id:id,selection:FOLLOW_SELECTION,
                 route:current.r&&[current.r.from,current.r.to,current.r.date],
-                rows:rows.length};}""", _route_detail["id"])
-            ck("goal 航线详情轮询重绘后仍保持可见",
+                rows:rows.length};}""", {"id":_route_detail["id"],
+                                               "rendered":_route_rendered})
+            ck("goal 航线关注真实刷新后同签名详情仍可见",
                _route_refresh["selected"] and _route_refresh["visible"]
                and _route_refresh["chart"] and _route_refresh["plot"]
                and _route_refresh["flights"] and _route_refresh["row"]
-               and _route_refresh["scoped"], str(_route_refresh))
+               and _route_refresh["scoped"] and _route_refresh["sameSignature"],
+               str(_route_refresh))
             pg.evaluate("""()=>{const id=document.querySelector(
               '#followRows [data-follow-kind=watch]')?.dataset.followId;
               if(id)followSelect('watch',id)}""")
