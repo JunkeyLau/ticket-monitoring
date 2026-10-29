@@ -346,6 +346,35 @@ def test_runtime_recovery_refreshes_config_revision_and_invalidates_state(
         webui._STATE_CACHE.update(old_cache)
 
 
+def test_runtime_recovery_clears_revision_when_config_hash_cannot_be_read(
+        tmp_path, monkeypatch):
+    import webui
+    path = tmp_path / 'config.yaml'
+    path.write_bytes(b'users: []\n')
+    monkeypatch.setattr(webui, '_wizard_txn_journal', lambda *_: str(tmp_path / 'journal.json'))
+    monkeypatch.setattr(webui, '_wizard_txn_recover', lambda *_: True)
+    monkeypatch.setattr(webui._State, 'config_revision', 'previous-revision')
+    reloads = []
+    monkeypatch.setattr(webui._State, 'reload_cb', lambda: reloads.append(True))
+    real_open = open
+    def unreadable_config(file, *args, **kwargs):
+        if str(file) == str(path):
+            raise OSError('injected config read failure')
+        return real_open(file, *args, **kwargs)
+    monkeypatch.setattr('builtins.open', unreadable_config)
+    old_cache = dict(webui._STATE_CACHE)
+    webui._STATE_CACHE.update({'sig': 'stale', 'payload': {'stale': True},
+                               'body': b'stale', 'etag': 'stale', 'gz': b'stale'})
+    try:
+        assert webui._wizard_txn_recover_runtime(str(path)) is True
+        assert not reloads  # read/hash is completed before runtime replacement
+        assert webui._State.config_revision == ''
+        assert all(webui._STATE_CACHE[k] is None for k in ('sig', 'payload', 'body', 'etag', 'gz'))
+    finally:
+        webui._STATE_CACHE.clear()
+        webui._STATE_CACHE.update(old_cache)
+
+
 def test_wizard_reports_persisted_save_when_runtime_reload_fails(
         config_server, tmp_path, monkeypatch):
     import webui

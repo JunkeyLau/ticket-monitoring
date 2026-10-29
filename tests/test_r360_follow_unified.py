@@ -90,6 +90,8 @@ def test_route_selection_and_target_edit_are_stable_and_unambiguous():
                   SRC.index("def _wizard_txn_commit(", SRC.index("def _wizard_txn_recover_runtime(config_path):"))]
     assert "with _STATE_LOCK:" in recover
     assert "_State.config_revision = hashlib.sha256" in recover
+    assert recover.index("_recovered_revision = hashlib.sha256") < recover.index("_State.reload_cb()")
+    assert '_State.config_revision = ""' in recover
     state = SRC[SRC.index("def _user_state(u):"):SRC.index("\ndef _state_cache_path", SRC.index("def _user_state(u):"))]
     assert '_route["config_index"] = _config_index' in state
     assert '"config_round_trip": r.get("config_round_trip", False)' in state

@@ -22896,11 +22896,12 @@ def _wizard_txn_recover_runtime(config_path):
     warning = ""
     try:
         with _STATE_LOCK:
+            with open(config_path, "rb") as _recovered_config:
+                _recovered_revision = hashlib.sha256(
+                    _recovered_config.read()).hexdigest()
             if _State.reload_cb:
                 _State.reload_cb()
-                with open(config_path, "rb") as _recovered_config:
-                    _State.config_revision = hashlib.sha256(
-                        _recovered_config.read()).hexdigest()
+                _State.config_revision = _recovered_revision
             _STATE_CACHE["sig"] = None
             _STATE_CACHE["payload"] = None
             _STATE_CACHE["body"] = None
@@ -22910,6 +22911,7 @@ def _wizard_txn_recover_runtime(config_path):
         warning = str(exc)
         try:
             with _STATE_LOCK:
+                _State.config_revision = ""
                 _STATE_CACHE["sig"] = None
                 _STATE_CACHE["payload"] = None
                 _STATE_CACHE["body"] = None
