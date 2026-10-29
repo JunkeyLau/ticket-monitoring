@@ -185,9 +185,9 @@ def main():
             ck("航线 chips≥3", len(pg.query_selector_all("#chartRoutes .chip")) >= 3)
 
             # ---- V50 子视图工作台 ----
-            ck("子视图 5/6 tab（demo 含特价）",
-               len(pg.query_selector_all("#montabs .mtab")) in (5, 6))
-            # 1280 桌面五等分：active 徽标不得撑宽单格；相邻格不得贴线
+            ck("四个主监控页签（关注内含航线走势与航班明细）",
+               len(pg.query_selector_all("#montabs .mtab")) == 4)
+            # 1280 桌面等分：active 徽标不得撑宽单格；相邻格不得贴线
             _mt = pg.evaluate("""()=>{
               const box=document.getElementById('montabs');
               const ts=[...box.querySelectorAll('.mtab')];
@@ -197,8 +197,8 @@ def main():
                 eq:Math.max(...rs.map(r=>r.width))-Math.min(...rs.map(r=>r.width))<=1,
                 overlap:rs.slice(0,-1).some((r,i)=>r.right>rs[i+1].left+1),
                 inside:rs.every(r=>r.left>=br.left-1&&r.right<=br.right+1)};}""")
-            ck("1280 四/五 tab 等宽无贴线",
-               _mt["n"] in (4, 5) and _mt["eq"] and not _mt["overlap"] and _mt["inside"])
+            ck("1280 四 tab 等宽无贴线",
+               _mt["n"] == 4 and _mt["eq"] and not _mt["overlap"] and _mt["inside"])
             ck("概览默认可见", pg.is_visible("#montab-overview"))
             ck("r353 总览关注卡容器挂载", pg.evaluate(
                 "()=>!!document.getElementById('monWatchCard')"
@@ -234,6 +234,9 @@ def main():
             node0 = pg.evaluate(
                 "document.querySelectorAll('#monview *').length")
             pg.click('.mtab[data-t="watch"]'); pg.evaluate("showMonTab('trend')"); pg.wait_for_timeout(600)
+            pg.evaluate("""()=>{for(const x of followItems().filter(x=>x.kind==='route')){
+              followSelect('route',x.id);if(filteredRows().length)break}}""")
+            pg.wait_for_timeout(350)
             ck("关注入口合并为清单+详情", pg.evaluate(
                 "()=>document.querySelectorAll('#montabs .mtab[data-t=\\\"watch\\\"]').length===1"
                 "&&!!document.querySelector('#followRows .follow-row')"
@@ -381,9 +384,9 @@ def main():
                     "()=>{gotoMonTab('trend');"
                     "document.getElementById('chart').focus();}")
                 pg.keyboard.press("Enter"); pg.wait_for_timeout(400)
-                ck("C-1 Enter 跳转+焦点交接明细 tab", pg.evaluate(
+                ck("C-1 Enter 跳转+焦点交接关注页签", pg.evaluate(
                     "()=>{const a=document.activeElement;"
-                    "return !!a&&a.dataset&&a.dataset.t==='details';}"))
+                    "return !!a&&a.dataset&&a.dataset.t==='watch';}"))
                 pg.evaluate("()=>resetFlt()"); pg.wait_for_timeout(200)
             else:
                 ck("走势点点击→明细子视图", False)
@@ -862,9 +865,9 @@ def main():
                 "()=>{const b=[...document.querySelectorAll('#tabs b')]"
                 ".find(x=>x.textContent.indexOf('深绿=真达标')===0);"
                 "return !!b&&getComputedStyle(b).fontSize==='11px';}"))
-            ck("chartEmpty 初始显示态", pg.evaluate(
-                "()=>document.getElementById('chartEmpty')"
-                ".style.display==='flex'"))
+            ck("选中关注航线后走势图退出空态", pg.evaluate(
+                "()=>!!document.querySelector('#followRouteDetail:not([hidden])')"
+                "&&document.getElementById('chartEmpty').style.display!=='flex'"))
             # ---- 明细行→走势页内跳转（结构性建议：
             # 跳转图谱唯一缺口，行尾 📈 与 ↗ 成对）——置于 chartEmpty
             # 初始态断言之后：跳转触发 chart() 会隐藏空态，勿污染前提 ----
@@ -951,8 +954,8 @@ def main():
             # 「首片幸存数」
             pg.evaluate("()=>{while(_tblAppend()){}}")
             # 胶囊渲染（demo 每航线最低价行合成 trendGo）
-            ck("胶囊 ≥3 行（3 航线最低价行）",
-               len(pg.query_selector_all("#ftable .tg")) >= 3)
+            ck("当前关注航线至少显示一条改期最低价行",
+               len(pg.query_selector_all("#ftable .tg")) >= 1)
             cap = pg.query_selector("#ftable .tg")
             ck("胶囊文案 改期+最低￥", cap is not None and
                cap.inner_text().startswith("改期") and "最低￥" in cap.inner_text())
@@ -966,7 +969,7 @@ def main():
             ck("tgrow 预置隐藏（零插拔渲染）", pg.evaluate(
                 "()=>{const t=[...document.querySelectorAll("
                 "'#ftable tr.tgrow')];"
-                "return t.length>=3&&t.every(x=>"
+                "return t.length>=1&&t.every(x=>"
                 "x.style.display==='none');}"))
             ck("非 trendGo 行无胶囊", pg.evaluate(
                 "()=>document.querySelectorAll('#ftable .tg').length==="
@@ -1041,7 +1044,7 @@ def main():
             #      测毕自复位（越界即红防假绿） ----
             ck("双胶囊组 各行独立展开互斥收对侧", pg.evaluate(
                 "()=>{const u=S.users[U];"
-                "const f0=u.flights.find(x=>(x.trendGo||[]).length>0);"
+                "const f0=filteredRows().find(x=>(x.trendGo||[]).length>0);"
                 "if(!f0)return false;"
                 "const f2=JSON.parse(JSON.stringify(f0));"
                 "f2.plat=f2.plat==='去哪儿'?'同程':'去哪儿';"
@@ -1194,7 +1197,10 @@ def main():
                 "()=>{const b=document.querySelector('#srccap .scbtn:not([hidden])');"
                 "return !!b&&b.getBoundingClientRect().height>=32;}"))
             ck("390 来源接入 H5 CTA 不被箭头遮挡", pg.evaluate(
-                "()=>{const b=document.querySelector('#srccap .scbtn.ghost');"
+                "()=>{document.querySelector('#srccap')?.scrollIntoView({block:'center'});"
+                "const b=[...document.querySelectorAll('#srccap .scbtn.ghost')]"
+                ".find(x=>x.getBoundingClientRect().width>0"
+                "&&x.getBoundingClientRect().height>0);"
                 "if(!b)return false;const r=b.getBoundingClientRect();"
                 "const el=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);"
                 "return el===b||b.contains(el);}"))
@@ -1242,6 +1248,8 @@ def main():
             # 否则幻影「筛选 1」；与 plats/routes 守卫同构。全程自复位） ----
             ck("筛选角标全选不计", pg.evaluate(
                 "()=>{const u=S.users[U];const el=document.getElementById('fltN');"
+                "const oldScope=FOLLOW_SCOPE,oldRoutes=FLT.routes,oldDates=FLT.dates;"
+                "FOLLOW_SCOPE=null;FLT.routes=new Set();"
                 "const ds=[...new Set(u.flights.map(f=>f.date).filter(Boolean))];"
                 "if(ds.length<2)return true;"
                 "FLT.dates=new Set(ds);updFltN();"
@@ -1249,6 +1257,7 @@ def main():
                 "FLT.dates=new Set([ds[0]]);updFltN();"
                 "const oneShown=el.style.display!=='none'&&el.textContent==='1';"
                 "FLT.dates=new Set(ds);updFltN();"
+                "FOLLOW_SCOPE=oldScope;FLT.routes=oldRoutes;FLT.dates=oldDates;"
                 "return fullHidden&&oneShown;}"))
             # ---- 健康时间线 xhint 判定若发生在隐藏容器
             # （首渲 sw=0 恒 false，「默认加载→点健康」主路径死档）——
@@ -1285,7 +1294,12 @@ def main():
             # .tw 放开内滚、tabs 吸顶可达，End=显式补全量+页面滚底+
             # 末行焦点交接，不依赖滚动事件接力——「补片推远底边打断
             # 平滑滚动」判例的页滚档投影）----
-            pg.evaluate("showMonTab('details')"); pg.wait_for_timeout(400)
+            pg.evaluate("""()=>{showMonTab('watch');resetFltUI();let best=null,n=-1;
+              for(const x of followItems().filter(x=>x.kind==='route')){
+                followSelect('route',x.id);const c=filteredRows().length;
+                if(c>n){best=x.id;n=c}}
+              if(best)followSelect('route',best);showMonTab('details')}""")
+            pg.wait_for_timeout(400)
             pg.evaluate("(()=>{const tw=document.querySelector("
                         "'#tablecard .tw');const r="
                         "tw.querySelector('tbody tr[data-k]');"
@@ -1307,7 +1321,8 @@ def main():
             # 视图切换器 montabs 吸顶贴 header 实高底（top=var(--hdh)
             # 动态单源）；明细筛选条 top 联动 var(--hdh)+--mtabsh(52)
             # （吸顶双条不重叠）----
-            pg.evaluate("window.scrollTo(0,900)"); pg.wait_for_timeout(300)
+            pg.evaluate("window.scrollTo(0,999999);const t=document.querySelector('#followRouteFlightsHost .tabs');if(t)_hfit(t)")
+            pg.wait_for_timeout(300)
             ck("390 montabs 吸顶贴 header 底", pg.evaluate(
                 "(()=>{const t=document.getElementById('montabs'),"
                 "h=document.querySelector('header');"
@@ -1333,18 +1348,22 @@ def main():
                 "wr=w.getBoundingClientRect();"
                 "return r.left>=-0.5&&r.left<=1&&"
                 "Math.abs(r.right-wr.right)<=1;})()"))
-            ck("390 明细 tabs 吸顶贴切换器底", pg.evaluate(
-                "(()=>{const t=document.querySelector("
-                "'#montab-details .tabs'),"
-                "m=document.getElementById('montabs');"
-                "if(!t||!m)return false;"
-                "return Math.abs(t.getBoundingClientRect().top"
-                "-m.getBoundingClientRect().bottom)<=3;})()"))
+            _sticky390 = pg.evaluate("""()=>{const t=document.querySelector(
+              '#followRouteFlightsHost .tabs'),m=document.getElementById('montabs');
+              const tr=t?.getBoundingClientRect(),mr=m?.getBoundingClientRect();
+              return {found:!!t,pos:t&&getComputedStyle(t).position,
+                top:tr?.top,bottom:tr?.bottom,mtop:mr?.top,mbottom:mr?.bottom,
+                hidden:t?.offsetParent===null,xhint:t?.classList.contains('xhint'),
+                sw:t?.scrollWidth,cw:t?.clientWidth};}""")
+            ck("390 当前航线明细筛选条吸顶贴切换器底",
+               _sticky390["found"] and not _sticky390["hidden"]
+               and abs(_sticky390["top"] - _sticky390["mbottom"]) <= 3,
+               str(_sticky390))
             # 吸顶条单行化（旧吸顶态 3 行高 131px 占屏 ~31%）：高 ≤60、
             # 图例隐藏（语义并入 fltBtn title）
             ck("390 吸顶筛选条单行化", pg.evaluate(
                 "(()=>{const t=document.querySelector("
-                "'#montab-details .tabs');const b=t&&t.querySelector"
+                "'#followRouteFlightsHost .tabs');const b=t&&t.querySelector"
                 "('b.muted');return !!t&&t.getBoundingClientRect().height"
                 "<=60&&!!b&&getComputedStyle(b).display==='none';})()"))
             # P1-W1 明细吸顶条横滚暗示+筛选入口常在：可滚时 xhint
@@ -1353,9 +1372,8 @@ def main():
             # 右缘（筛选抽屉 ≤760 唯一入口，不依赖滚动可达）
             ck("390 明细条横滚暗示 xhint 点亮", pg.evaluate(
                 "(()=>{const t=document.querySelector("
-                "'#montab-details .tabs');"
-                "return !!t&&t.classList.contains('xhint')&&"
-                "t.scrollWidth>t.clientWidth+4&&"
+                "'#followRouteFlightsHost .tabs');if(t)_hfit(t);return !!t&&"
+                "t.classList.contains('xhint')&&t.scrollWidth>t.clientWidth+4&&"
                 "getComputedStyle(t,'::after').opacity==='1';})()"))
             ck("390 fltBtn 常在视口内", pg.evaluate(
                 "(()=>{const b=document.getElementById('fltBtn');"
@@ -1376,7 +1394,7 @@ def main():
             ck("390 深滚开抽屉落点可见", pg.evaluate(
                 "(()=>{const f=document.querySelector('.fbar');"
                 "if(!f||!f.classList.contains('open'))return false;"
-                "const t=document.querySelector('#montab-details .tabs');"
+                "const t=document.querySelector('#followRouteFlightsHost .tabs');"
                 "return f.getBoundingClientRect().top>="
                 "t.getBoundingClientRect().bottom-2&&"
                 "f.getBoundingClientRect().top<window.innerHeight;})()"))
@@ -1453,15 +1471,15 @@ def main():
             pg.click('#cfgnav .cnav[data-p="login"]')
             pg.wait_for_timeout(300)
             pg.evaluate("()=>switchView('mon')"); pg.wait_for_timeout(300)
-            # ---- 320 档：六视图、横向溢出、图标/文字与层级 ----
+            # ---- 320 档：四个主视图、横向溢出、图标/文字与层级 ----
             pg.set_viewport_size({"width": 320, "height": 844})
             pg.evaluate("showMonTab('overview')")
             pg.wait_for_timeout(350)
             ck("320 无横向滚动", pg.evaluate(
                 "document.documentElement.scrollWidth") <= 321)
-            ck("320 六视图全部在视口内", pg.evaluate(
+            ck("320 四个主视图全部在视口内", pg.evaluate(
                 "()=>{const ns=[...document.querySelectorAll('#montabs .mtab')];"
-                "if(ns.length<6)return false;"
+                "if(ns.length!==4)return false;"
                 "return ns.every(n=>{const r=n.getBoundingClientRect();"
                 "return r.width>20&&r.left>=-1&&r.right<=innerWidth+1;});}"))
             ck("320 切换器 3×2 网格", pg.evaluate(
@@ -1691,7 +1709,7 @@ def main():
                 ck("触屏走势首 tap 画十字线读数（不跳转）", _tp.evaluate(
                     """(b)=>{const c=document.getElementById('chart');
                       const on=document.querySelector('#montabs .mtab.on');
-                      return c.toDataURL()!==b&&!!on&&on.dataset.t==='trend';}""",
+                      return c.toDataURL()!==b&&!!on&&on.dataset.t==='watch';}""",
                     _tap["before"]))
             else:
                 ck("触屏走势首 tap 画十字线读数（不跳转）", False)
@@ -1711,20 +1729,27 @@ def main():
               const g=id=>{const e=document.getElementById(id);
                 if(!e||!e.offsetWidth)return null;
                 const r=e.getBoundingClientRect();return [r.left,r.right];};
-              const c=g('chartcard');const ids=
-                ['hdcard','mainnav','demoBar','opscard'];
-              const out={chartL:c[0]};
-              ids.forEach(id=>{const e=g(id);
-                out[id]=(e===null)?null:Math.abs(e[0]-c[0]);});
-              return out;}""")
-            ck("1920 trend 标题条对齐", _al["hdcard"] is not None
-               and _al["hdcard"] < 2)
-            ck("1920 trend 视图 nav 对齐", _al["mainnav"] is not None
-               and _al["mainnav"] < 2)
-            ck("1920 trend 演示横幅对齐", _al["demoBar"] is not None
-               and _al["demoBar"] < 2)
-            ck("1920 trend 操作卡对齐", _al["opscard"] is not None
-               and _al["opscard"] < 2)
+              const page=g('mainnav'),detail=g('followRouteDetail'),
+                chart=g('chartcard'),head=g('hdcard');
+              const host=document.querySelector('#followRouteChartHost');
+              const hr=host&&host.getBoundingClientRect();
+              const cr=document.getElementById('chartcard')?.getBoundingClientRect();
+              return {pageL:page&&page[0],detail,chart,head,
+                contained:!!(hr&&cr)&&cr.left>=hr.left-1&&cr.right<=hr.right+1,
+                width:document.documentElement.scrollWidth};}""")
+            ck("1920 关注航线走势图嵌入详情容器",
+               _al["detail"] is not None and _al["chart"] is not None
+               and _al["contained"] and _al["width"] <= 1921)
+            ck("1920 页头与全局导航保持同一基线",
+               _al["head"] is not None and _al["pageL"] is not None
+               and abs(_al["head"][0] - _al["pageL"]) < 2)
+            ck("1920 全局演示横幅保持在页头左缘",
+               pg.evaluate("""()=>{const a=document.querySelector('#mainnav'),
+                 b=document.querySelector('#demoBar');return !!a&&!!b&&
+                 Math.abs(a.getBoundingClientRect().left-
+                   b.getBoundingClientRect().left)<2;}"""))
+            ck("1920 全局操作卡不重复挂入关注详情",
+               pg.evaluate("()=>!document.querySelector('#followRouteDetail #opscard')"))
             pg.evaluate("showMonTab('overview')")
             pg.wait_for_timeout(400)
             _bk = pg.evaluate("""()=>{
@@ -1737,7 +1762,8 @@ def main():
             ck("1920 overview 常驻块与 KPI 对齐", all(
                 _bk[k] is not None and abs(_bk[k] - _bk["kpi"]) < 2
                 for k in ("ops", "pulse", "hdr", "nav")))
-            ck("1920 切标签零横移", abs(_bk["kpi"] - _al["chartL"]) < 2)
+            ck("1920 切标签零横移", _al["pageL"] is not None
+               and _bk["nav"] is not None and abs(_bk["nav"] - _al["pageL"]) < 2)
             # ≥1920 档放开非比例件（statline 跟卡全宽），
             # .grid/.kpisum 放宽 1440（空腔收敛）；1400 下界防
             # 「放宽声明未生效」回归（层叠被盖回时退回 1168 即红）
@@ -1780,9 +1806,9 @@ def main():
                 if(!e||!e.offsetWidth)return null;
                 return e.getBoundingClientRect().left;};
               return {ops:g('opscard'), montabs:g('montabs')};}""")
-            ck("1920 health 全块对齐抽检", all(
-                v is not None and abs(v - _al["chartL"]) < 2
-                for v in (_hl["ops"], _hl["montabs"])))
+            ck("1920 健康页切换器与页头左缘对齐",
+               _al["pageL"] is not None and _hl["montabs"] is not None
+               and abs(_hl["montabs"] - _al["pageL"]) < 2)
             # 横滚抽检 1920
             _sw = pg.evaluate(
                 "document.documentElement.scrollWidth")
@@ -1800,7 +1826,8 @@ def main():
             # 侧栏/主视图 nav 与服务端内容左缘同轴，页头 18px 满幅包住。
             ck("1920 cfg 内容卡随监控页拓宽", _cw["cv"] is not None
                and _cw["cv"][1] - _cw["cv"][0] > 1400
-               and abs(_cw["cv"][0] - _al["chartL"]) < 3)
+               and _al["pageL"] is not None
+               and abs(_cw["cv"][0] - _al["pageL"]) < 3)
             ck("1920 cfg 标题条包住内容卡", _cw["hd"] is not None
                and _cw["hd"][0] <= _cw["cv"][0] + 1
                and _cw["hd"][1] >= _cw["cv"][1] - 1)
@@ -2279,8 +2306,26 @@ def main():
                 ".every(d=>d.style.display==='none')"))
             # 动作钮收编真命中：搜「添加关注航线」钮文本精确命中可见
             pg.fill("#cfgSearch", "添加关注航线"); pg.wait_for_timeout(300)
-            ck("搜索收编添加关注航线钮", pg.is_visible(".addrbtn")
-               and "无匹配项" not in (pg.inner_text("#cfgHits") or ""))
+            _wizpg = b.new_page(viewport={"width": 1280, "height": 900})
+            _wizpg.goto(BASE, wait_until="domcontentloaded")
+            _wizpg.wait_for_selector("#users .kpi", state="attached", timeout=30000)
+            _wizpg.wait_for_timeout(500)
+            _wizpg.evaluate("""async()=>{await load();switchView('mon');
+              showMonTab('watch');followAdd()}""")
+            try:
+                _wizpg.wait_for_function("!!document.querySelector('#cwWizard')",
+                                         timeout=8000)
+            except Exception:
+                pass
+            _wizard_check = _wizpg.evaluate("""()=>({entry:!!document.querySelector(
+              '#montab-watch #followAdd'),open:!!document.querySelector('#cwWizard'),
+              text:document.querySelector('#cwWizard')?.innerText||'',
+              view:VIEW,dirty:typeof cfgCoreDirty==='function'&&cfgCoreDirty()})""")
+            ck("添加关注统一由关注页四步向导提供",
+               _wizard_check["entry"] and _wizard_check["open"]
+               and "四步完成" in _wizard_check["text"], str(_wizard_check))
+            _wizpg.evaluate("()=>document.querySelector('#cwWizard [data-cwzcancel]')?.click()")
+            _wizpg.close()
             pg.fill("#cfgSearch", ""); pg.wait_for_timeout(300)
             ck("清空登录卡复位", pg.evaluate(
                 "()=>[...document.querySelectorAll('#cfgview .lgcard')]"
@@ -2587,12 +2632,14 @@ def main():
             pg.set_viewport_size({"width": 1440, "height": 900})
             pg.wait_for_timeout(300)
             ck("EN-1 明细首屏可见数据行", pg.evaluate(
-                "()=>{showMonTab('details');table();"
+                "()=>{showMonTab('watch');"
+                "for(const x of followItems().filter(x=>x.kind==='route'))"
+                "{followSelect('route',x.id);table();if(filteredRows().length)break;}"
                 "window.scrollTo(0,0);"
                 "const r=document.querySelector('#ftable tbody tr[data-k]');"
-                "if(!r)return false;"
-                "return r.getBoundingClientRect().bottom"
-                "<=window.innerHeight;}"))
+                "if(!r||!document.querySelector('#followRouteDetail:not([hidden])'))return false;"
+                "r.scrollIntoView({block:'center'});const b=r.getBoundingClientRect();"
+                "return b.top>=0&&b.bottom<=window.innerHeight;}"))
             # EN-7 价格字号阶梯：主判据 15px 与次要字段拉开（compact 档
             # 保持 13px 密度语义）；1440 档零横滚是字号加档的前提前钉
             ck("EN-7 cozy 档明细价格 15px", pg.evaluate(
@@ -2605,8 +2652,10 @@ def main():
                 "document.documentElement.dataset.density='cozy';"
                 "return s==='13px';}"))
             ck("EN-7 1440 明细窗零横向滚动", pg.evaluate(
-                "()=>{const tw=document.querySelector('#tablecard .tw');"
-                "return tw.scrollWidth<=tw.clientWidth+1;}"))
+                "()=>{for(const x of followItems().filter(x=>x.kind==='route'))"
+                "{followSelect('route',x.id);table();if(filteredRows().length)break;}"
+                "const tw=document.querySelector('#followRouteFlightsHost #tablecard .tw');"
+                "return !!tw&&tw.scrollWidth<=tw.clientWidth+1;}"))
             # EN-5 中转列条件隐藏：全直飞视图整列「—」零信息 → 隐藏整列
             # （按当前筛选结果集判定，非全库）；xrow colspan 展开行不受扰
             ck("EN-5 全直飞视图中转列隐藏", pg.evaluate(
@@ -2700,7 +2749,7 @@ def main():
             pg.goto(BASE + "#trend/u0", wait_until="domcontentloaded")
             pg.wait_for_timeout(1500)
             ck("启动深链双段恢复+hash 零污染", pg.evaluate(
-                "()=>(typeof MONTAB!=='undefined'&&MONTAB==='trend'"
+                "()=>(typeof MONTAB!=='undefined'&&MONTAB==='watch'"
                 "&&location.hash==='#trend/u0')"))
 
             # ---- 擦边词面双端同语言钉：pctTxt 半点向上 + ≤0.5 边界
@@ -2741,9 +2790,7 @@ def main():
                 "for(let i=3;i<img.length;i+=4)if(img[i]>40)ink++;"
                 "return ink>15;}"))
 
-            # ---- W-1 行为钉：390 档视图切换器单行横滚——第 4 格
-            # 完整高度落容器内（折行曾被锁高裁成 10px 残条）+ 真溢出
-            # 时 xhint 暗示点亮。先测后拍（本段无截图动作） ----
+            # ---- W-1 行为钉：390 档四个主视图均完整可达且触控高度足够 ----
             pg.set_viewport_size({"width": 390, "height": 780})
             pg.wait_for_timeout(500)
             _w1 = pg.evaluate(
@@ -2756,14 +2803,13 @@ def main():
                 "sw:mb.scrollWidth,cw:mb.clientWidth,"
                 "xh:mb.classList.contains('xhint'),"
                 "vis:mb.offsetParent!==null};}")
-            ck("390 档切换器末格完整在容器", bool(
-                _w1 and _w1.get("n") in (5, 6) and _w1.get("h", 0) >= 30
+            ck("390 档最后一个主视图完整在容器", bool(
+                _w1 and _w1.get("n") == 4 and _w1.get("h", 0) >= 30
                 and _w1.get("inside") and _w1.get("vis")))
             # 溢出暗示阈值判定：EN-6 字号归并后 390 档内容溢出收窄至
             # 3px（<4px「可滚才挂」阈值）——暗示不亮是正确行为（3px
             # 裁角不值得横滚），钉住「容差内放下不误挂」新事实
-            # r368 更长的用户级 tab 名（关注航线走势/关注航班走势/关注航班明细）
-            # 在 390 必然可横滚：暗示灯必须与「真溢出」同拍，不误挂也不漏挂
+            # 四个主视图在 390 下可容纳时不应残留横滚提示。
             ck("390 档切换器溢出暗示同拍", bool(
                 _w1 and _w1.get("xh") == (
                     _w1.get("sw", 0) > _w1.get("cw", 0) + 4)))
@@ -2852,7 +2898,11 @@ def main():
                 "document.getElementById('hdcard').style.height=''")
             pg.evaluate("document.getElementById('m4spacer').remove()")
             pg.wait_for_timeout(400)
-            pg.evaluate("gotoMonTab('details')")
+            pg.evaluate("""()=>{gotoMonTab('details');resetFltUI();let best=null,n=-1;
+              for(const x of followItems().filter(x=>x.kind==='route')){
+                followSelect('route',x.id);const c=filteredRows().length;
+                if(c>n){best=x.id;n=c}}
+              if(best)followSelect('route',best)}""")
             pg.evaluate("window.scrollTo({top:0,behavior:'instant'})")
             pg.wait_for_timeout(200)
 
@@ -2937,18 +2987,35 @@ def main():
                 "const hd=document.querySelector('header').offsetHeight;"
                 "const mt=document.getElementById('montabs').offsetHeight;"
                 "return sp>=hd+mt-2;}"))
-            ck("541-760 锚点跳转落点不被遮挡", pg.evaluate(
-                """()=>{gotoMonTab('details');
-                const t=document.querySelector('#ftable tbody tr');
-                t.scrollIntoView({block:'start'});
-                return new Promise(r=>setTimeout(()=>{
-                const top=t.getBoundingClientRect().top;
-                const hd=document.querySelector('header').offsetHeight;
-                const mt=document.getElementById('montabs').offsetHeight;
-                const ok=top>=hd+mt-6&&top<hd+mt+150;   /* r302 T1：demo 倒计时 chip 进 header 后实高按内容漂移，绝对上限 200 是旧单行头校准值——「不被遮挡」的本体语义=落在双吸顶件下方近处，改相对断言（二十一§7：动态化同轮固定值钉改相对） */
-                showMonTab('overview',true);
-                window.scrollTo({top:0,behavior:'instant'});
-                r(ok);},350));}"""))
+            _anchor541 = pg.evaluate("""()=>{gotoMonTab('details');resetFltUI();
+              let best=null,n=-1;for(const x of followItems().filter(x=>x.kind==='route')){
+                followSelect('route',x.id);const c=filteredRows().length;
+                if(c>n){best=x.id;n=c}}
+              if(best)followSelect('route',best);table();
+              return new Promise(r=>setTimeout(()=>{
+               const t=[...document.querySelectorAll('#ftable tbody tr[data-k]')]
+                .find(x=>x.offsetHeight>0&&x.getBoundingClientRect().width>0);
+               if(!t)return r({found:false,innerWidth:window.innerWidth});
+               const key=t.dataset.k;t.scrollIntoView({block:'start'});
+               setTimeout(()=>{const live=[...document.querySelectorAll(
+                  '#ftable tbody tr[data-k]')].find(x=>x.dataset.k===key
+                    &&x.offsetHeight>0&&x.getBoundingClientRect().width>0);
+                if(!live)return r({found:false,replaced:true,key,innerWidth});
+                const rect=live.getBoundingClientRect(),top=rect.top,
+                hd=document.querySelector('header').offsetHeight,
+                mt=document.getElementById('montabs').offsetHeight,
+                ts=parseFloat(getComputedStyle(document.documentElement)
+                  .getPropertyValue('--tabsh'))||0,base=hd+mt+ts,
+                height=rect.height,margin=getComputedStyle(live).scrollMarginBlockStart,
+                scrollY=window.scrollY,documentY=rect.top+scrollY,
+                innerWidth=window.innerWidth,scrollHeight=document.documentElement.scrollHeight,
+                tw=document.querySelector('.tw'),twInfo=tw?{client:tw.clientHeight,scroll:tw.scrollHeight,
+                  overflow:getComputedStyle(tw).overflowY}:null;
+                showMonTab('overview',true);window.scrollTo({top:0,behavior:'instant'});
+                r({found:true,top,height,margin,hd,mt,ts,base,scrollY,documentY,
+                  innerWidth,scrollHeight,twInfo,
+                  ok:top>=base-6&&top<base+150});},350);},350));}""")
+            ck("541-760 锚点跳转落点不被遮挡", _anchor541.get("ok"), str(_anchor541))
 
             # ---- EN-3 行为钉：显式重置入口恢复默认排序+告知；跳转类
             # 直调 resetFlt 不播报（单条 toast 纪律）----
@@ -3463,23 +3530,32 @@ def main():
             ck("r237-2b 桶起点词面两位月形态", pg.evaluate(
                 "()=>HPTS.cd.every(c=>/^(0[1-9]|1[0-2])-[0-3][0-9] "
                 "[0-2][0-9]:[0-5][0-9]$/.test(c.t0))"))
-            pg.evaluate("gotoMonTab('details')")
+            pg.evaluate("""()=>{gotoMonTab('details');resetFltUI();let best=null,n=-1;
+              for(const x of followItems().filter(x=>x.kind==='route')){
+                followSelect('route',x.id);const c=filteredRows().length;
+                if(c>n){best=x.id;n=c}}
+              if(best)followSelect('route',best)}""")
             pg.wait_for_timeout(600)
-            ck("r237-3 brk 行角标描边豁免", pg.evaluate(
+            _brk_pretax = pg.evaluate(
                 """()=>{const td=document.querySelector(
-                  '#ftable td.price.brk');
-                  if(!td)return false;
+                  '#ftable td.price');
+                  if(!td)return {found:false};
                   /* 构造式：demo 现形态 brk×pretax 组合不产出（r326
                      实测 2 brk 行均无角标）——在真 brk 底上注入同族
                      span 验同一层叠豁免，验毕移除零残留 */
                   const s=document.createElement('span');
+                  td.classList.add('brk');
                   s.className='pretax';s.textContent='退￥0·改￥0';
                   td.appendChild(s);
                   const c=getComputedStyle(s);
-                  const ok=parseFloat(c.webkitTextStrokeWidth)===0
-                    &&c.color.indexOf('transparent')<0;
-                  s.remove();
-                  return ok;}"""))
+                  const out={found:true,stroke:parseFloat(c.webkitTextStrokeWidth),
+                    color:c.color};
+                  s.remove();td.classList.remove('brk');
+                  return out;}""")
+            ck("r237-3 brk 行角标描边豁免",
+               _brk_pretax.get("found") and _brk_pretax.get("stroke") == 0
+               and "transparent" not in _brk_pretax.get("color", ""),
+               str(_brk_pretax))
             pg.evaluate("switchView('cfg')")
             pg.wait_for_timeout(900)
             ck("r237-4 cfgglobals 失败 CTA 同词面", pg.evaluate(
@@ -3495,26 +3571,33 @@ def main():
             pg.wait_for_timeout(400)
             pg.set_viewport_size({"width": 600, "height": 900})
             pg.wait_for_timeout(400)
-            pg.evaluate("gotoMonTab('details')")
+            pg.evaluate("""()=>{gotoMonTab('details');resetFltUI();let best=null,n=-1;
+              for(const x of followItems().filter(x=>x.kind==='route')){
+                followSelect('route',x.id);const c=filteredRows().length;
+                if(c>n){best=x.id;n=c}}
+              if(best)followSelect('route',best)}""")
             pg.wait_for_timeout(500)
             pg.evaluate("window.scrollTo(0,999999)")
             pg.wait_for_timeout(400)
-            ck("541-760 筛选条吸顶贴切换器底", pg.evaluate(
-                "()=>{const t=document.querySelector("
-                "'#montab-details .tabs'),"
-                "m=document.getElementById('montabs');"
-                "if(!t||!m)return false;"
-                "return getComputedStyle(t).position==='sticky'"
-                "&&Math.abs(t.getBoundingClientRect().top"
-                "-m.getBoundingClientRect().bottom)<=3;}"))
+            _sticky600 = pg.evaluate("""()=>{const t=document.querySelector(
+              '#followRouteFlightsHost .tabs'),m=document.getElementById('montabs');
+              const tr=t?.getBoundingClientRect(),mr=m?.getBoundingClientRect();
+              return {found:!!t,pos:t&&getComputedStyle(t).position,
+                top:tr?.top,mbottom:mr?.bottom,hidden:t?.offsetParent===null,
+                xhint:t?.classList.contains('xhint'),sw:t?.scrollWidth,cw:t?.clientWidth};}""")
+            ck("541-760 筛选条吸顶贴切换器底",
+               _sticky600["found"] and _sticky600["pos"] == "sticky"
+               and not _sticky600["hidden"]
+               and abs(_sticky600["top"] - _sticky600["mbottom"]) <= 3,
+               str(_sticky600))
             ck("541-760 筛选条单行化", pg.evaluate(
                 "()=>{const t=document.querySelector("
-                "'#montab-details .tabs');const b=t&&t.querySelector"
+                "'#followRouteFlightsHost .tabs');const b=t&&t.querySelector"
                 "('b.muted');return !!t&&t.getBoundingClientRect().height"
                 "<=60&&!!b&&getComputedStyle(b).display==='none';}"))
             ck("541-760 落点过吸顶三件", pg.evaluate(
                 """()=>{const bar=document.querySelector(
-                '#montab-details .tabs'),m=document.getElementById(
+                '#followRouteFlightsHost .tabs'),m=document.getElementById(
                 'montabs');
                 if(!bar||!m)return false;
                 if(getComputedStyle(bar).position!=='sticky')return false;
@@ -3533,14 +3616,14 @@ def main():
                 "document.documentElement).getPropertyValue("
                 "'--tabsh'))||0;"
                 "const t=document.querySelector("
-                "'#montab-details .tabs');"
+                "'#followRouteFlightsHost .tabs');"
                 "return !!t&&Math.abs(ts-t.offsetHeight)<=1;}"))
             # ≤540 同公式落点收口（390 档）
             pg.set_viewport_size({"width": 390, "height": 844})
             pg.wait_for_timeout(400)
             ck("≤540 落点过吸顶三件（同族遮挡收口）", pg.evaluate(
                 """()=>{const bar=document.querySelector(
-                '#montab-details .tabs'),m=document.getElementById(
+                '#followRouteFlightsHost .tabs'),m=document.getElementById(
                 'montabs');
                 if(!bar||!m)return false;
                 if(getComputedStyle(bar).position!=='sticky')return false;
@@ -3568,7 +3651,7 @@ def main():
             pg.wait_for_timeout(400)
             ck("541-760 深滚开抽屉顶拉 assist", pg.evaluate(
                 """()=>{const f=document.querySelector('.fbar'),
-                t=document.querySelector('#montab-details .tabs');
+                t=document.querySelector('#followRouteFlightsHost .tabs');
                 if(!f||!t||!f.classList.contains('open'))return false;
                 return f.getBoundingClientRect().top
                   >=t.getBoundingClientRect().bottom-3;}"""))
@@ -4024,25 +4107,29 @@ def main():
               await new Promise(rs=>setTimeout(rs,200));
               fire('touchend',x,y);
               await new Promise(rs=>setTimeout(rs,250));
-              const tabBefore=MONTAB;
+              const detail=document.querySelector('#tablecard'),
+                topBefore=detail?detail.getBoundingClientRect().top:innerHeight;
               fire('touchstart',x,y);
               await new Promise(rs=>setTimeout(rs,200));
               fire('touchend',x,y);
               c.dispatchEvent(new MouseEvent('click',{clientX:x,clientY:y,
                 bubbles:true,button:0}));
               await new Promise(rs=>setTimeout(rs,500));
+              const detailAfter=document.querySelector('#tablecard'),
+                topAfter=detailAfter?detailAfter.getBoundingClientRect().top:innerHeight;
               return {startPainted:base!==afterStart,
                 endKept:afterStart===afterEnd1,
                 cancelCleared:pinned!==afterCancel,
-                jumped:tabBefore!==MONTAB};
+                jumped:MONTAB==='watch'&&!!detailAfter&&topAfter<topBefore-40};
             })()""")
             _cdp.send("Emulation.setTouchEmulationEnabled", {"enabled": False})
             ck("触屏首拍抬指读数驻留（旧无条件清线监听已退役）",
-               bool(_tch.get("startPainted")) and bool(_tch.get("endKept")))
+               bool(_tch.get("startPainted")) and bool(_tch.get("endKept")),
+               str(_tch))
             ck("touchcancel 手势接管全清（十字线不滞留）",
                bool(_tch.get("cancelCleared")))
-            ck("同点二次 tap 放行跳明细（双拍跳转路径不回归）",
-               bool(_tch.get("jumped")))
+            ck("同点二次 tap 将关注页滚到明细（双拍路径不回归）",
+               bool(_tch.get("jumped")), str(_tch))
             pg.evaluate("showMonTab('overview')"); pg.wait_for_timeout(200)
 
             # ---- r283v P3 钉（图例首屏可达 + 搜索态导航降饱和）----
@@ -4102,14 +4189,16 @@ def main():
             pg.evaluate("showMonTab('overview')"); pg.wait_for_timeout(300)
             # r368 用户级 tab 名更长：375 允许容器内横滚（xhint 提示），
             # 但不得撑破页面；触控高仍须 ≥36
-            ck("375 切换器容器内横滚且触控高≥36",
+            ck("375 四个主视图触控高≥36且不撑破容器",
                pg.evaluate(
                 """()=>{
                   const m=document.getElementById('montabs');
                   if(!m)return false;
                   const ts=[...m.querySelectorAll('.mtab')];
-                  return (ts.length===5||ts.length===6)
-                    &&m.scrollWidth>=m.clientWidth
+                  const r=m.getBoundingClientRect();
+                  return ts.length===4
+                    &&ts.every(t=>{const x=t.getBoundingClientRect();
+                      return x.height>=36&&x.left>=r.left-1&&x.right<=r.right+1;})
                     &&ts.every(t=>t.getBoundingClientRect().height>=36)
                     &&document.documentElement.scrollWidth
                       <=document.documentElement.clientWidth+1;
@@ -4502,7 +4591,7 @@ def main():
             pg.evaluate(
                 "if(CFG.length>JSON.parse(CFG_CLEAN).length)CFG.pop()")
             _dirty_ok = True; _dirty_msg = []
-            for _sel in ('input[onchange*="alert_direct"]',
+            for _sel in ('#cfgform input[onchange*="alert_direct"]',
                          'input[onchange*="report_hour"]'):
                 _r2 = pg.evaluate(
                     """(sel)=>{const i=document.querySelector(sel);
@@ -5181,8 +5270,12 @@ def main():
             #   视图/视口段内复位 ----
             step("r326 审计收口")
             pg.evaluate("switchView('mon')")
+            _intl_route = pg.evaluate("""()=>{const x=followItems().find(x=>
+              x.kind==='route'&&(isIntlCode(x.route.from)||isIntlCode(x.route.to)));
+              if(!x)return false;followSelect('route',x.id);return true}""")
+            pg.wait_for_timeout(350)
             pg.evaluate("resetFltUI()"); pg.wait_for_timeout(450)
-            pg.evaluate("showMonTab('details')"); pg.wait_for_timeout(500)
+            pg.evaluate("showMonTab('watch');table()"); pg.wait_for_timeout(500)
             pg.evaluate("()=>{while(_tblAppend()){}}")
             _a3 = pg.evaluate(
                 """()=>{
@@ -5194,26 +5287,28 @@ def main():
                   const r=b.getBoundingClientRect();
                   return {found:true, w:Math.round(r.width),
                           h:Math.round(r.height)};}""")
-            ck("r326 桌面带国际行「国际」紫标承载（%sx%s）"
+            ck("r326 当前国际航线明细含「国际」紫标（%sx%s）"
                % (_a3.get("w"), _a3.get("h")),
-               _a3.get("found") and _a3["w"] > 0 and _a3["h"] > 0)
-            _a2 = pg.evaluate(
+               _intl_route and _a3.get("found")
+               and _a3["w"] > 0 and _a3["h"] > 0)
+            _intl_pretax = pg.evaluate(
                 """()=>{
                   const intlF=[...document.querySelectorAll(
                     '#ftable tbody tr[data-k]')]
                     .find(r=>r.querySelector('.tag.t-i')
                           &&r.querySelector('[data-plat="fliggy"]'));
-                  const domF=[...document.querySelectorAll(
-                    '#ftable tbody tr[data-k]')]
-                    .find(r=>!r.querySelector('.tag.t-i')
-                          &&r.querySelector('[data-plat="fliggy"]'));
-                  return {intlNoPretax: intlF
-                           ? !intlF.querySelector('.pretax') : null,
-                          domHasPretax: domF
-                           ? !!domF.querySelector('.pretax') : null};}""")
-            ck("r326 飞猪国际行无「税前」假警示（intl=%s dom=%s）"
-               % (_a2["intlNoPretax"], _a2["domHasPretax"]),
-               _a2["intlNoPretax"] is True and _a2["domHasPretax"] is True)
+                  return !!intlF&&!intlF.querySelector('.pretax');}""")
+            _dom_route = pg.evaluate("""()=>{const x=followItems().find(x=>
+              x.kind==='route'&&!isIntlCode(x.route.from)&&!isIntlCode(x.route.to));
+              if(!x)return false;followSelect('route',x.id);table();return true}""")
+            pg.wait_for_timeout(350)
+            _dom_pretax = pg.evaluate("""()=>[...document.querySelectorAll(
+              '#ftable tbody tr[data-k]')].some(r=>
+                !r.querySelector('.tag.t-i')&&
+                r.querySelector('[data-plat="fliggy"]')&&
+                r.querySelector('.pretax'))""")
+            ck("r326 国际行不标「税前」、国内飞猪仍保留提示",
+               _intl_route and _intl_pretax and _dom_route and _dom_pretax)
             pg.evaluate("showMonTab('overview')"); pg.wait_for_timeout(200)
 
             # ---- r331 触屏双击缩放免疫钉：段在流程最末（统计落盘前）。
@@ -5882,17 +5977,22 @@ def main():
             pg.wait_for_timeout(300)
 
             # ===== r354 UI 质量回归门（按缺陷出现的视口钉死） =====
-            # 1) 分区编号在单页内唯一（旧 04/04、05/05 重复）
+            # 1) 分区编号在当前关注对象的单个详情面板内唯一。
             _dupn = []
-            for _tab in ["overview", "trend", "watch", "details", "health"]:
-                pg.evaluate("showMonTab('%s')" % _tab)
-                pg.wait_for_timeout(250)
-                _nos = pg.evaluate("""()=>[...document.querySelectorAll(
-                  '#monview [role=tabpanel]')].filter(p=>p.offsetParent!==null)
-                  .flatMap(p=>[...p.querySelectorAll('.seclab .no')]
-                  .map(x=>x.textContent.trim()))""")
-                if len(_nos) != len(set(_nos)):
-                    _dupn.append((_tab, _nos))
+            for _kind in ("route", "watch"):
+                pg.evaluate("""kind=>{const row=document.querySelector(
+                  '#followRows [data-follow-kind="'+kind+'"]');
+                  if(row)followSelect(kind,row.dataset.followId)}""", _kind)
+                pg.wait_for_timeout(350)
+                _nos = pg.evaluate("""kind=>{const root=document.querySelector(
+                  kind==='route'?'#followRouteDetail':'#followFlightDetail');
+                  if(!root||root.hidden)return [];
+                  return [...root.querySelectorAll('[role=tabpanel]')]
+                    .filter(p=>p.offsetParent!==null)
+                    .map(p=>[...p.querySelectorAll('.seclab .no')]
+                      .map(x=>x.textContent.trim()));}""", _kind)
+                if any(len(_panel) != len(set(_panel)) for _panel in _nos):
+                    _dupn.append((_kind, _nos))
             ck("r354 分区编号单页唯一", not _dupn, str(_dupn[:2]))
             # 2) 关注台无 <10px 文字（旧 8px 标签）
             pg.evaluate("showMonTab('watch')")
@@ -6568,29 +6668,29 @@ def main():
               return bad.slice(0,8)}""")
             ck("r361 检索页图标与文案零相交",
                len(_ico361) == 0, str(_ico361))
-            _p359.evaluate("switchView('mon');showMonTab('overview')")
-            _p359.wait_for_timeout(2400)
+            _p359.evaluate("""()=>{switchView('mon');showMonTab('watch');
+              const w=document.querySelector('#followRows [data-follow-kind=watch]');
+              if(w)followSelect('watch',w.dataset.followId)}""")
+            _p359.wait_for_timeout(1800)
             _mw361 = _p359.evaluate("""()=>{
-              const card=document.querySelector('.monwatch');if(!card)
-                return {none:true};
-              const box=card.querySelector('.monwatch-chs'),
-                cov=card.querySelector('.monwatch-foot > span:nth-of-type(2)'),
-                svg=card.querySelector('.monwatch-svg'),
-                lg=card.querySelector('.monwatch-svg .lg'),
-                bic=card.querySelector('.monwatch-ch .bic');
-              const b=box&&box.getBoundingClientRect(),
-                c=cov&&cov.getBoundingClientRect(),
-                s=svg&&svg.getBoundingClientRect(),
-                l=lg&&lg.getBoundingClientRect();
-              return {n:card.querySelectorAll('.monwatch-ch').length,
-                icon:bic?+bic.getBoundingClientRect().width.toFixed(1):0,
-                gap:(b&&c)?+(c.left-b.right).toFixed(1):null,
-                legendFits:!!(s&&l)&&l.bottom<=s.bottom-1,
+              const detail=document.querySelector('#followFlightDetail');
+              const strip=detail&&detail.querySelector('.ws-chanstrip'),
+                channels=strip?[...strip.querySelectorAll('.ws-ch')]:[],
+                legend=detail&&detail.querySelector('.ws-legend'),
+                rows=legend?[...legend.querySelectorAll('.ws-lg')]:[],
+                firstIcon=channels[0]&&channels[0].querySelector('svg,.bic,img'),
+                lb=legend&&legend.getBoundingClientRect(),
+                db=detail&&detail.getBoundingClientRect();
+              return {visible:!!detail&&!detail.hidden,
+                n:channels.length,
+                icon:firstIcon?+firstIcon.getBoundingClientRect().width.toFixed(1):0,
+                legendFits:!!(lb&&db)&&lb.left>=db.left-1&&lb.right<=db.right+1,
+                legendRows:rows.length,
                 over:document.documentElement.scrollWidth>innerWidth+1}}""")
-            ck("r361 关注卡渠道图标/图例不重叠",
-               not _mw361.get("none")
-               and _mw361["n"] == 5 and _mw361["icon"] >= 17
-               and _mw361["gap"] >= 4 and _mw361["legendFits"]
+            ck("r361 指定航班详情渠道控件/关注图例不重叠",
+               _mw361["visible"] and _mw361["n"] == 5
+               and _mw361["icon"] >= 14 and _mw361["legendRows"] > 0
+               and _mw361["legendFits"]
                and not _mw361["over"], str(_mw361))
             _p359.evaluate("switchView('search')")
             _p359.wait_for_timeout(700)
@@ -6719,27 +6819,33 @@ def main():
                and not _d359b["over"], str(_d359b))
             _c359.close()
 
-            # goal: 关注航线/关注航班曲线与检索/明细筛选统一
+            # goal: 航线与航班关注统一为同一清单及对象详情
             pg.set_viewport_size({"width": 1440, "height": 900})
-            pg.evaluate("switchView('mon');showMonTab('overview')")
-            pg.wait_for_timeout(800)
+            pg.evaluate("switchView('mon');showMonTab('watch')")
+            pg.wait_for_timeout(1400)
             _u = pg.evaluate("""()=>({
-              routeCard:getComputedStyle(document.querySelector('#monRouteCard')).display!=='none',
-              routes:document.querySelectorAll('#monRouteList .monroute').length,
-              routeSvg:document.querySelectorAll('#monRouteList .monroute svg').length,
-              watchCard:getComputedStyle(document.querySelector('#monWatchCard')).display!=='none',
-              watchSvg:document.querySelectorAll('#monWatchList .monwatch svg').length})""")
-            ck("goal 关注航线卡与共享迷你曲线",
-               _u["routeCard"] and _u["routes"] > 0 and _u["routeSvg"] > 0, str(_u))
-            ck("goal 关注航班卡与独立迷你曲线",
-               _u["watchCard"] and _u["watchSvg"] > 0, str(_u))
-            pg.evaluate("showMonTab('watch')")
-            pg.wait_for_timeout(2200)
-            _ws = pg.evaluate("""()=>({
-              scope:document.querySelector('#wsRouteWatch')?.innerText||'',
-              spark:document.querySelectorAll('#wsRouteWatch .ws-rwspark svg').length})""")
-            ck("goal 关注台子集过滤摘要", "关注航班 = 配置关注航线 + 同日期明细中的指定航班" in _ws["scope"], str(_ws["scope"][:80]))
-            ck("goal 关注台航线共享曲线", _ws["spark"] > 0, str(_ws))
+              board:!!document.querySelector('#followBoard'),
+              rows:[...document.querySelectorAll('#followRows .follow-row')],
+              routeCount:document.querySelectorAll('#followRows [data-follow-kind=route]').length,
+              flightCount:document.querySelectorAll('#followRows [data-follow-kind=watch]').length})""")
+            ck("goal 航线与指定航班在同一关注清单", _u["board"]
+               and _u["routeCount"] > 0 and _u["flightCount"] > 0, str(_u))
+            pg.evaluate("followSelect('route',document.querySelector('#followRows [data-follow-kind=route]').dataset.followId)")
+            pg.wait_for_timeout(500)
+            _route_detail = pg.evaluate("""()=>({
+              visible:!document.querySelector('#followRouteDetail').hidden,
+              chart:!!document.querySelector('#followRouteChartHost #chartcard'),
+              flights:!!document.querySelector('#followRouteFlightsHost #montab-details')})""")
+            ck("goal 航线详情内含走势与当日明细", _route_detail["visible"]
+               and _route_detail["chart"] and _route_detail["flights"], str(_route_detail))
+            pg.evaluate("followSelect('watch',document.querySelector('#followRows [data-follow-kind=watch]').dataset.followId)")
+            pg.wait_for_timeout(900)
+            _flight_detail = pg.evaluate("""()=>({
+              visible:!document.querySelector('#followFlightDetail').hidden,
+              studio:document.querySelector('#watchStudio').parentElement.id==='followFlightDetail',
+              chart:!!document.querySelector('#followFlightDetail #wsChart')})""")
+            ck("goal 指定航班详情复用走势与提醒控件", _flight_detail["visible"]
+               and _flight_detail["studio"] and _flight_detail["chart"], str(_flight_detail))
             pg.evaluate("switchView('search')")
             pg.wait_for_timeout(1200)
             pg.evaluate("document.querySelector('#srxFilterBtn').click()")
@@ -7001,6 +7107,9 @@ def main():
             # v297 关注台 legend 不再把代码压成色块
             pg.evaluate("showMonTab('watch')")
             pg.wait_for_timeout(1200)
+            pg.evaluate("""()=>{const w=document.querySelector('#followRows [data-follow-kind=watch]');
+              if(w)followSelect('watch',w.dataset.followId)}""")
+            pg.wait_for_timeout(500)
             _lg297 = pg.evaluate("""()=>{const c=document.querySelector('.ws-lg'),
               b=c&&c.querySelector('b'),p=c&&c.querySelector('span');
               if(!b||!p)return{ok:false,n:0};

@@ -726,11 +726,12 @@ const RM=window.matchMedia&&window.matchMedia('(prefers-reduced-motion:reduce)')
     与航线走势同等级：真实采集点、目标跑道、渠道覆盖、可溯源；不补点、不平滑。 */
  #montab-overview #monRouteCard,#montab-overview #monWatchCard{display:none!important}
  .follow-board{margin:0 0 12px;min-width:0}
- .follow-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 2px 12px}
+ .follow-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 2px 12px;min-width:0;max-width:100%;box-sizing:border-box}
  .follow-head h2{margin:0;font-size:20px;letter-spacing:-.3px}
  .follow-head p{margin:4px 0 0;color:var(--mut);font-size:12px}
- .follow-layout{display:grid;grid-template-columns:minmax(220px,300px) minmax(0,1fr);gap:12px;align-items:start}
+ .follow-layout{display:grid;grid-template-columns:minmax(220px,260px) minmax(0,1fr);gap:12px;align-items:start}
  .follow-list,.follow-detail{background:var(--card);border:1px solid var(--line);border-radius:var(--r2);min-width:0;overflow:hidden}
+ #followDetail,#followRouteDetail{overflow:clip}
  .follow-list-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px 8px}
  .follow-search{display:block;padding:0 10px 9px}.follow-search input{width:100%;height:34px;border:1px solid var(--ctlbd);border-radius:7px;background:var(--card);color:var(--tx);padding:0 10px}
  #followRows{max-height:min(72vh,760px);overflow:auto;border-top:1px solid var(--line)}
@@ -748,7 +749,8 @@ const RM=window.matchMedia&&window.matchMedia('(prefers-reduced-motion:reduce)')
  #followRouteChartHost{padding:10px}.follow-board #chartcard,#followRouteChartHost #calcard{margin:0 0 10px}.follow-board #wsEmptyHero{display:none!important}
  #followFlightDetail .wstudio{padding:0}.follow-board .ws-routebar,.follow-board .ws-roster{display:none!important}
  #followFlightDetail .ws-head-act [data-wsact="add"],#followFlightDetail .ws-head-act [data-wsact="search"]{display:none!important}
- @media(max-width:760px){.follow-layout{grid-template-columns:minmax(0,1fr)}#followRows{max-height:34vh}.follow-detail-head{align-items:flex-start;flex-direction:column}}
+ @media(max-width:900px){.follow-layout{grid-template-columns:minmax(0,1fr)}.follow-head{flex-wrap:wrap}.follow-head>div{min-width:0;flex:1 1 220px}.follow-head>#followAdd{flex:0 0 auto}}
+ @media(max-width:760px){#followRows{max-height:34vh}.follow-detail-head{align-items:flex-start;flex-direction:column}}
  #montab-watch{--ws-pad:16px}
  .wstudio{display:flex;flex-direction:column;gap:10px;min-width:0}
  .ws-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r2);box-shadow:var(--sh1);min-width:0;overflow:hidden}

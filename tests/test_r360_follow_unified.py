@@ -75,7 +75,6 @@ def test_route_selection_and_target_edit_are_stable_and_unambiguous():
     assert "function followCfgRoutesUnchanged(cfgUser)" in SRC
     assert "JSON.stringify(base.routes||[])===JSON.stringify(cfgUser.routes||[])" in SRC
     assert "routesDirty" in SRC and "航线尚未保存" in SRC
-    assert '"config_revision": st.config_revision' in SRC
     assert 'with _STATE_LOCK:\n                        n = st.reload_cb()' in SRC
     main = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
     assert 'with _STATE_LOCK:' in main[main.index('def reload_config():'):main.index('# 调度周期热更新', main.index('def reload_config():'))]
@@ -84,12 +83,14 @@ def test_route_selection_and_target_edit_are_stable_and_unambiguous():
     assert "with _STATE_LOCK:" in state_builder
     assert "runtime_users = st.users" in state_builder
     assert "config_revision = st.config_revision" in state_builder
+    assert '"config_revision": config_revision' in state_builder
     assert "st.users is not runtime_users" in state_builder
     assert "st.config_revision != config_revision" in state_builder
     recover = SRC[SRC.index("def _wizard_txn_recover_runtime(config_path):"):
                   SRC.index("def _wizard_txn_commit(", SRC.index("def _wizard_txn_recover_runtime(config_path):"))]
     assert "with _STATE_LOCK:" in recover
-    assert "_State.config_revision = hashlib.sha256" in recover
+    assert "_recovered_revision = hashlib.sha256" in recover
+    assert "_State.config_revision = _recovered_revision" in recover
     assert recover.index("_recovered_revision = hashlib.sha256") < recover.index("_State.reload_cb()")
     assert '_State.config_revision = ""' in recover
     state = SRC[SRC.index("def _user_state(u):"):SRC.index("\ndef _state_cache_path", SRC.index("def _user_state(u):"))]
@@ -125,7 +126,6 @@ def test_user_state_keeps_config_identity_for_route_objects_and_dicts(tmp_path):
         webui._State.cfg = old_cfg
         webui._State.config_revision = old_revision
     rows = state["routesArr"]
-    assert state["config_revision"] == "test-revision"
     assert [r["config_index"] for r in rows] == [1, 2]
     assert [r["config_round_trip"] for r in rows] == [False, True]
 
@@ -162,6 +162,9 @@ def test_build_state_discards_snapshot_if_hot_reload_wins(monkeypatch):
         thread.join(3)
         assert not thread.is_alive()
         assert webui._STATE_CACHE["payload"] is None
+        webui._build_state(None)
+        assert webui._STATE_CACHE["payload"]["config_revision"] == "new-revision"
+        assert webui._STATE_CACHE["payload"]["users"][0]["name"] == "new"
     finally:
         release.set()
         thread.join(3)
