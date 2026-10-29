@@ -197,8 +197,8 @@ def main():
                 eq:Math.max(...rs.map(r=>r.width))-Math.min(...rs.map(r=>r.width))<=1,
                 overlap:rs.slice(0,-1).some((r,i)=>r.right>rs[i+1].left+1),
                 inside:rs.every(r=>r.left>=br.left-1&&r.right<=br.right+1)};}""")
-            ck("1280 五/六 tab 等宽无贴线",
-               _mt["n"] in (5, 6) and _mt["eq"] and not _mt["overlap"] and _mt["inside"])
+            ck("1280 四/五 tab 等宽无贴线",
+               _mt["n"] in (4, 5) and _mt["eq"] and not _mt["overlap"] and _mt["inside"])
             ck("概览默认可见", pg.is_visible("#montab-overview"))
             ck("r353 总览关注卡容器挂载", pg.evaluate(
                 "()=>!!document.getElementById('monWatchCard')"
@@ -233,7 +233,11 @@ def main():
             pg.click('.mtab[data-t="overview"]'); pg.wait_for_timeout(300)
             node0 = pg.evaluate(
                 "document.querySelectorAll('#monview *').length")
-            pg.click('.mtab[data-t="trend"]'); pg.wait_for_timeout(600)
+            pg.click('.mtab[data-t="watch"]'); pg.evaluate("showMonTab('trend')"); pg.wait_for_timeout(600)
+            ck("关注入口合并为清单+详情", pg.evaluate(
+                "()=>document.querySelectorAll('#montabs .mtab[data-t=\\\"watch\\\"]').length===1"
+                "&&!!document.querySelector('#followRows .follow-row')"
+                "&&document.getElementById('followDetail')!==null"))
             ck("子视图切换零插拔", node0 == pg.evaluate(
                 "document.querySelectorAll('#monview *').length"))
             ck("切走势显图表", pg.is_visible("#chartcard"))
@@ -734,7 +738,7 @@ def main():
             pg.goto(BASE + "/"); pg.wait_for_timeout(600)
 
             # ---- 航班明细子视图 ----
-            pg.click('.mtab[data-t="details"]'); pg.wait_for_timeout(400)
+            pg.click('.mtab[data-t="watch"]'); pg.evaluate("showMonTab('details')"); pg.wait_for_timeout(400)
             # 筛选默认折叠：明细交互门先展开抽屉（与生产入口一致）
             pg.evaluate("()=>{const fb=document.querySelector('.fbar');"
                         "if(fb&&getComputedStyle(fb).display==='none')togFlt();}")
@@ -864,7 +868,7 @@ def main():
             # ---- 明细行→走势页内跳转（结构性建议：
             # 跳转图谱唯一缺口，行尾 📈 与 ↗ 成对）——置于 chartEmpty
             # 初始态断言之后：跳转触发 chart() 会隐藏空态，勿污染前提 ----
-            pg.click('.mtab[data-t="details"]'); pg.wait_for_timeout(300)
+            pg.click('.mtab[data-t="watch"]'); pg.evaluate("showMonTab('details')"); pg.wait_for_timeout(300)
             tj = pg.query_selector_all("#ftable .tj")
             ck("明细行走势跳转件在场", len(tj) > 0)
             # .tj 入触控热区外扩家族（::after absolute；
@@ -879,7 +883,7 @@ def main():
                 ck("明细行跳走势（标签切换+图渲染）", pg.evaluate(
                    "()=>document.querySelector('#montab-trend')"
                    ".style.display===''&&document.querySelector("
-                   "'#montab-details').style.display==='none'"))
+                   "'#montab-details').style.display===''"))
                 # ---- chip 高亮须跟随跳转（buildChartChips
                 # 显式重建律）——点「非当前 CHR.i 航线」的行抓真回归
                 # （首行恰好默认航线时 chip 本就正确、抓不到漏重建）----
@@ -906,7 +910,7 @@ def main():
                         "const arr=u.routesArr||[];"
                         "return arr.length>=2&&!!on&&on.textContent==="
                         "(arr[idx]||{}).label;}"))
-                pg.click('.mtab[data-t="details"]'); pg.wait_for_timeout(300)
+                pg.click('.mtab[data-t="watch"]'); pg.evaluate("showMonTab('details')"); pg.wait_for_timeout(300)
                 # .tj 键位 Space=Enter 同义跳走势（Space
                 # 冒泡到行级 tr 的 Enter||Space 处理器会误开同班比价面板）
                 pg.evaluate(
@@ -916,7 +920,7 @@ def main():
                 ck("tj Space 跳走势不误开比价", pg.evaluate(
                    "()=>document.querySelector('#montab-trend')"
                    ".style.display===''&&EXP===null"))
-                pg.click('.mtab[data-t="details"]'); pg.wait_for_timeout(300)
+                pg.click('.mtab[data-t="watch"]'); pg.evaluate("showMonTab('details')"); pg.wait_for_timeout(300)
                 # 跳转把 CHR[nm].i 锚到明细行航线并随 saveUI 持久化，
                 # reload 后日历/走势渲染该航线——复位回默认航线，
                 # 后续依赖初始视图态的断言（暗色日历 AA）不背状态污染
@@ -3753,7 +3757,7 @@ def main():
             # r243 字体 ±1px 同族），无外扩且自身矮的件才违例（新件漏
             # 进外扩家族即抓）。a.vw(33)/.tj(32) 横向 <36 是在案设计取舍
             # （右邻命中互吃约束——webui L998/L1009 注释，备案豁免）----
-            pg.click('.mtab[data-t="details"]'); pg.wait_for_timeout(300)
+            pg.click('.mtab[data-t="watch"]'); pg.evaluate("showMonTab('details')"); pg.wait_for_timeout(300)
             _r10 = pg.evaluate(
                 "()=>{const tb=document.querySelector('#ftable tbody');"
                 "if(!tb)return 'NO_TABLE';"

@@ -126,14 +126,14 @@ class TestWebuiV180Pins:
         src = self._src()
         i0 = src.index("function jumpRowTrend(")
         body = src[i0:src.index("\nfunction ", i0 + 10)]
-        assert 'querySelector(\'.mtab[data-t="trend"]\')' in body \
+        assert 'querySelector(\'.mtab[data-t="watch"]\')' in body \
             and ".focus()" in body, "jumpRowTrend 缺焦点交接"
         i1 = src.index("function jumpQual(")
         # 块边界窗口（无固定长度兜底——函数合法增厚不假红，窗口长度是
         # 实现细节，锚结构才是钉面）
         nxt1 = src.find("\nfunction ", i1 + 10)
         body1 = src[i1:nxt1] if nxt1 > 0 else src[i1:]
-        assert '.mtab[data-t="details"]' in body1 and ".focus()" in body1, \
+        assert '.mtab[data-t="watch"]' in body1 and ".focus()" in body1, \
             "jumpQual 缺焦点交接"
 
     def test_p2_filter_chips_empty_neutral(self):

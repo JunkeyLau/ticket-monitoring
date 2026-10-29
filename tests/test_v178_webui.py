@@ -123,7 +123,7 @@ class TestWebuiV178Pins:
         i0 = src.index("function jumpCalDate(")
         i1 = src.index("\nfunction ", i0 + 10)
         body = src[i0:i1]
-        assert '.mtab[data-t="details"]' in body, "焦点交接目标缺失"
+        assert '.mtab[data-t="watch"]' in body, "统一关注页焦点交接目标缺失"
         assert ".focus()" in body, "jumpCalDate 未做焦点交接"
 
     def test_p2_route_span_atomic_wrap(self):

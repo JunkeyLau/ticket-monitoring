@@ -54,7 +54,7 @@ def test_tgb_bar_contrast_computed(srv):
     ≥3:1（非文字图形档）。"""
     pw, page = srv
     page.evaluate("""() => {
-      const t=document.querySelector('[data-t="details"]')||
+      const t=document.querySelector('[data-t="watch"]')||
         document.querySelector('#tabs');if(t)t.click();
     }""")
     got = page.evaluate("""() => {
