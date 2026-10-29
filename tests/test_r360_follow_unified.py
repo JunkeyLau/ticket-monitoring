@@ -69,6 +69,10 @@ def test_route_selection_and_target_edit_are_stable_and_unambiguous():
     assert "if(matches.length!==1)return null" in match
     assert "followRouteIsRoundTrip(r)!==Boolean(row.config_round_trip)" in match
     assert "if(followRouteIsRoundTrip(r))return null" in match
+    assert "S.config_revision!==CFG_REVISION" in match
+    assert '"config_revision": st.config_revision' in SRC
+    assert 'if st.reload_cb and not _reload_warning:' in SRC
+    assert '_STATE_SCHEMA = "probe-r365-2"' in SRC
     state = SRC[SRC.index("def _user_state(u):"):SRC.index("\ndef _state_cache_path", SRC.index("def _user_state(u):"))]
     assert '_route["config_index"] = _config_index' in state
     assert '"config_round_trip": r.get("config_round_trip", False)' in state
@@ -86,7 +90,9 @@ def test_user_state_keeps_config_identity_for_route_objects_and_dicts(tmp_path):
     dbp = str(tmp_path / "follow-state.db")
     PriceStorage(dbp)
     old_cfg = webui._State.cfg
+    old_revision = webui._State.config_revision
     webui._State.cfg = {"output": {"db_path": dbp}}
+    webui._State.config_revision = "test-revision"
     one_way = Route("SHA", "上海", "JFK", "纽约", ["2026-12-17"])
     one_way._config_index = 1  # raw config index after a filtered disabled rule
     routes = [
@@ -98,7 +104,9 @@ def test_user_state_keeps_config_identity_for_route_objects_and_dicts(tmp_path):
         state = webui._user_state({"name": "follow", "routes": routes})
     finally:
         webui._State.cfg = old_cfg
+        webui._State.config_revision = old_revision
     rows = state["routesArr"]
+    assert state["config_revision"] == "test-revision"
     assert [r["config_index"] for r in rows] == [1, 2]
     assert [r["config_round_trip"] for r in rows] == [False, True]
 

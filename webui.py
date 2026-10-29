@@ -311,7 +311,7 @@ def _demo_config_payload() -> dict:
                           "from_name": "上海",
                           "max_price": 400, "days": 30}],
         }],
-        "city": dict(_CITY_TAB),
+        "city": dict(_CITY_TAB), "revision": "demo",
         "cityx": _cityx(), "intl": _intl_payload(),
         "airline_alias": _airalias(), "demo": True,
         "globals": {"interval_minutes": 15, "jitter_minutes": 5,
@@ -9879,7 +9879,8 @@ function followRenderDetail(item){
   if(title)title.textContent=item.label;
   followEnsureConfig();
   const match=followConfigRoute(item),th=r.th||{},disabled=match?'':' disabled';
-  if(meta)meta.innerHTML='日期 '+he(r.date||'未设置')+' · 直飞目标 ¥<input class="follow-target" aria-label="直飞目标价" type="number" min="0" step="10"'+disabled+' value="'+he(th.direct||0)+'" onchange="followSetRouteTarget(\''+he(item.id)+'\',\'alert_direct\',this.value)"> · 中转目标 ¥<input class="follow-target" aria-label="中转目标价" type="number" min="0" step="10"'+disabled+' value="'+he(th.transfer||0)+'" onchange="followSetRouteTarget(\''+he(item.id)+'\',\'alert_transfer\',this.value)">'+(match?'':' · 配置未就绪或匹配不唯一，请到航线配置中修改');
+  const revisionMismatch=!!(CFG_REVISION&&S&&S.config_revision&&S.config_revision!==CFG_REVISION);
+  if(meta)meta.innerHTML='日期 '+he(r.date||'未设置')+' · 直飞目标 ¥<input class="follow-target" aria-label="直飞目标价" type="number" min="0" step="10"'+disabled+' value="'+he(th.direct||0)+'" onchange="followSetRouteTarget(\''+he(item.id)+'\',\'alert_direct\',this.value)"> · 中转目标 ¥<input class="follow-target" aria-label="中转目标价" type="number" min="0" step="10"'+disabled+' value="'+he(th.transfer||0)+'" onchange="followSetRouteTarget(\''+he(item.id)+'\',\'alert_transfer\',this.value)">'+(match?'':(revisionMismatch?' · 配置已变化，请刷新后再修改':' · 配置未就绪或匹配不唯一，请到航线配置中修改'));
   let st=CHR[u.name];if(typeof st==='number')st={i:st};st=st||{};st.i=item.index;st.r=(st.r==='48h'||st.r==='7d'||TREND_LONG[st.r])?st.r:'7d';CHR[u.name]=st;saveUI();
   const routeKey=String(r.label||'').replace(/\s+\d{2}[/]\d{2}\s*$/,'');
   FOLLOW_SCOPE={route:routeKey,date:String(r.date||'')};
@@ -9900,6 +9901,7 @@ function followRouteIsRoundTrip(r){return !!((Array.isArray(r&&r.ret_dates)?r.re
 function followConfigRoute(item){
  const user=(S&&S.users&&S.users[U])||{},cfgUser=(CFG||[]).find(x=>x.name===user.name);
  if(!cfgUser)return null;
+ if(!CFG_REVISION||!S||!S.config_revision||S.config_revision!==CFG_REVISION)return null;
  const row=(item&&item.route)||{},routes=cfgUser.routes||[],date=String(row.date||''),sourceIndex=Number(row.config_index),matches=routes.map((r,index)=>({r,index})).filter(x=>x.index===sourceIndex&&x.r.enabled!==false&&x.r.from===row.from&&x.r.to===row.to&&(x.r.dates||[]).includes(date));
  if(matches.length!==1)return null;
  const {r,index}=matches[0];
@@ -20863,6 +20865,7 @@ class _State:
     report_push = None
     reload_cb = None
     config_path = "config.yaml"
+    config_revision = ""
     version = ""
     listen = ""
     started_at = ""
@@ -24696,7 +24699,7 @@ _STATE_CACHE_TTL = 48 * 3600          # 超过则丢弃（不展示数天前价�
 _STATE_CACHE_MAGIC = b"TKMSTATE1\n"
 # /api/state payload schema: bump whenever serialized fields change in a way
 # that must not be served from an older disk snapshot (r340 adds provenance).
-_STATE_SCHEMA = "probe-r365-1"
+_STATE_SCHEMA = "probe-r365-2"
 
 
 def _state_cache_path():
@@ -24840,6 +24843,7 @@ def _build_state(sig):
     except Exception:
         pass
     out = {"updated": updated, "users": states,
+           "config_revision": st.config_revision,
            "suspended": _suspended_users(users, st.cfg.get("users") or []),
            "next_run": _next_run(), "version": st.version,
            "demo": bool(DEMO["on"]),
@@ -26763,6 +26767,8 @@ class _Handler(BaseHTTPRequestHandler):
                     n = 0
                     _reload_warning = str(_reload_error)
                     st.logger.exception("[web配置] 已保存，但运行时热重载失败")
+                if st.reload_cb and not _reload_warning:
+                    st.config_revision = _new_revision
                 if _wizard_txid:
                     _receipt["reload_warning"] = _reload_warning
                     _wizard_write_receipt(st.config_path, _receipt)
@@ -27661,6 +27667,15 @@ def start_web(cfg, job, report_push, logger=None, users=None,
     _State.report_push = report_push
     _State.reload_cb = reload_cb
     _State.config_path = config_path
+    if DEMO["on"]:
+        _State.config_revision = "demo"
+    else:
+        try:
+            with open(config_path, "rb") as _cfg_file:
+                _State.config_revision = hashlib.sha256(
+                    _cfg_file.read()).hexdigest()
+        except OSError:
+            _State.config_revision = ""
     _State.version = version
     _State.login_saved_cb = login_saved_cb
     if logger:
