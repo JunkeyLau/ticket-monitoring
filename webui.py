@@ -11590,6 +11590,10 @@ function armConfirm(el,fn,opts){if(!el&&!opts)return;   /* 空锚静默 */
 let HL=null,HL_ETAG='';
 /* Current authentication is independent of quote ETags and historical health. */
 var CHANNEL_STATE=CHANNEL_STATE||{payload:null,error:'',request:0,at:0,pending:null};
+window._channelHealthReady=!!window._channelHealthReady;
+window._channelPulseReady=!!window._channelPulseReady;
+window._channelHealthHasRounds=!!window._channelHealthHasRounds;
+window._channelPulseHasRounds=!!window._channelPulseHasRounds;
 function srxToggleScNote(btn){
  const n=document.getElementById('scNote');if(!n)return;
  const on=n.classList.toggle('open');
@@ -11651,17 +11655,26 @@ function jumpChannelHealth(){switchView('mon');showMonTab('health');}
 function renderChannelLamp(){
  const el=$('channelLamp'),txt=$('channelLampText');if(!el)return;
  const payload=(CHANNEL_STATE&&CHANNEL_STATE.payload)||null,
-  plats=(payload&&payload.plats)||{},need=Object.keys(plats).filter(p=>channelAuthView(p).needsLogin),
+  plats=(payload&&payload.plats)||{},names=['qunar','ctrip','fliggy','tongcheng','tuniu'],
+  need=names.filter(p=>channelAuthView(p).needsLogin),
+  authBad=names.filter(p=>['save_error','read_error','challenge'].includes(channelAuthView(p).status)),
+  authVerified=!!payload&&names.every(p=>channelAuthView(p).status==='available'),
   fails=Number(window._ovCollectFails||0)>0||Number(window._ovPushStreak||0)>0,
-  readErr=!!((CHANNEL_STATE&&CHANNEL_STATE.error)||window._channelHealthError||window._channelPulseError);
+  readErr=!!((CHANNEL_STATE&&CHANNEL_STATE.error)||window._channelHealthError||window._channelPulseError),
+  allReady=!!payload&&!!window._channelHealthReady&&!!window._channelPulseReady;
  let tone='warn',label='读取中',detail='正在读取渠道健康、采集与登录状态';
  if(readErr){tone='bad';label='读取失败';detail='渠道状态读取失败；稍后自动重试'}
- else if(fails||need.length){tone='bad';label=need.length?'需处理':'有异常';detail=need.length
+ else if(fails||need.length||authBad.length){tone='bad';label=need.length?'需处理':'有异常';detail=need.length
    ?'以下渠道需要重新登录：'+need.map(p=>(LOGIN_CN&&LOGIN_CN[p])||p).join('、')
    :'采集失败或推送通道连败；点击查看渠道健康'}
  else if((S&&S.demo)||(payload&&payload.demo)){
   tone='demo';label='演示';detail='演示数据不代表真实渠道登录或采集状态'}
- else if(payload||HL||PU){tone='ok';label='正常';detail='暂未发现采集失败、推送连败或待重新登录渠道'}
+ else if(!allReady){tone='warn';label='读取中';detail='正在等待登录、健康与扫描状态全部返回'}
+ else if(!authVerified){tone='warn';label='待核验';detail=authBad.length
+   ?'渠道登录状态存在异常；点击查看渠道健康'
+   :'至少一个渠道尚未验证可用；点击查看登录与渠道健康'}
+ else if(!window._channelHealthHasRounds||!window._channelPulseHasRounds){tone='warn';label='暂无扫描';detail='各状态已读取，尚无可核验的扫描轮次'}
+ else {tone='ok';label='正常';detail='五个渠道、健康记录与扫描轮次均已核验，暂未发现异常'}
  el.className='channel-lamp '+tone;
  if(txt)txt.textContent='渠道 · '+label;
  el.title=detail+'；点击查看渠道健康与登录';
@@ -11676,14 +11689,16 @@ function renderHealthLoginAction(){
 }
 async function srcAccessState(force){return loadChannelState(!!force);}
 async function health(){srcAccessState(false);try{const r=await fetch('/api/health',{headers:HL_ETAG?{'If-None-Match':HL_ETAG}:{}});
- if(r.status===304){window._channelHealthError=false;renderChannelLamp();return;}
+ if(r.status===304){if(!HL)throw new Error('健康状态无缓存');const cached=JSON.parse(HL);if(!Array.isArray(cached.rounds)||!cached.stats||typeof cached.stats!=='object')throw new Error('健康缓存响应异常');window._channelHealthReady=true;window._channelHealthHasRounds=cached.rounds.length>0;window._channelHealthError=false;renderChannelLamp();return;}
+ if(!r.ok)throw new Error('HTTP '+r.status);
  const _et=r.headers.get('ETag');
  const t=await r.text();
  let _j=null;try{_j=JSON.parse(t)}catch(_e){HL_ETAG='';throw _e}
- window._channelHealthError=!!(_j&&_j.err);renderChannelLamp();
+ if(!_j||_j.err||!Array.isArray(_j.rounds)||!_j.stats||typeof _j.stats!=='object'||!_j.push||!_j.push.channels||typeof _j.push.channels!=='object')throw new Error('健康状态响应异常');
+ window._channelHealthReady=true;window._channelHealthHasRounds=_j.rounds.length>0;window._channelHealthError=false;renderChannelLamp();
  /* 错误体不是可缓存的新鲜健康态：保留旧 ETag 会让恢复拍携带它，
    服务端回 304 后错误态永远退不出去。 */
- if(_j&&_j.err){HL_ETAG='';}else if(_et){HL_ETAG=_et;}
+ if(_et){HL_ETAG=_et;}
  if(t===HL)return;HL=t;renderHealth(_j);}
  catch(e){HL_ETAG='';window._channelHealthError=true;renderChannelLamp();/* 失败拍作废内容校验：否则恢复拍仍带旧 ETag，服务端回 304 后错误态永不退出 */
   /* 错误态落点（_markStale 家族）：健康 tab 整区纯空白=零
@@ -11875,24 +11890,17 @@ async function showLog(el){let p=null,ts=null;if(el&&el.dataset){p=el.dataset.p;
   :'<div class="muted">该时间窗无日志（或已滚动出日志尾部 2MB 读取范围）</div>';
  _openPvMask();}catch(e){if(_sq===_PV_SEQ)toast('请求失败','err');}finally{if(_sq===_PV_SEQ)_PV_PENDING=false;}}
 /* ===== 运行脉冲：/api/pulse（每轮每渠道行数/耗时，签派台脉搏） ===== */
-let PU=null,PU_ETAG='';
+let PU=null,PU_ETAG='',PU_CACHE=null;
 const PCN={'qunar':'去哪儿','fliggy':'飞猪','ctrip':'携程','tongcheng':'同程','tuniu':'途牛'};
-async function pulse(){try{const r=await fetch('/api/pulse',{headers:PU_ETAG?{'If-None-Match':PU_ETAG}:{}});
-  if(r.status===304){window._channelPulseError=false;renderChannelLamp();return;}
-  const _et=r.headers.get('ETag');if(_et)PU_ETAG=_et;
-  const t=await r.text();window._channelPulseError=false;
-  if(t===PU){renderChannelLamp();return;}
-  /* 空守卫先于签名记账：无用户不写 PU，避免 state 恢复拍同文本早退。 */
-  if(!(S&&S.users&&S.users.length)){renderChannelLamp();return;}
-  PU=t;window._channelPulseError=false;renderPulse(JSON.parse(t));renderChannelLamp();
- }catch(e){PU_ETAG='';window._channelPulseError=true;renderChannelLamp();/* 失败拍作废 ETag；pulse 属「有则显示」，失败保持静默不制造假等待 */}
-}
+function acceptPulse304(){const raw=PU_CACHE||PU;if(!raw)throw new Error('扫描状态无缓存');const j=JSON.parse(raw);if(!j||j.ok!==true||!Array.isArray(j.rounds))throw new Error('扫描缓存响应异常');window._channelPulseReady=true;window._channelPulseHasRounds=j.rounds.length>0;window._channelPulseError=false;if(S&&S.users&&S.users.length&&PU!==raw){PU=raw;renderPulse(j);}renderChannelLamp();}
+async function pulse(){/* 有则显示 */try{const r=await fetch('/api/pulse',{headers:PU_ETAG?{'If-None-Match':PU_ETAG}:{}});if(r.status===304){acceptPulse304();return;}if(!r.ok)throw Error('HTTP '+r.status);const _et=r.headers.get('ETag'),t=await r.text(),j=JSON.parse(t);if(!j||j.ok!==true||!Array.isArray(j.rounds))throw Error('扫描状态响应异常');window._channelPulseReady=true;window._channelPulseHasRounds=j.rounds.length>0;window._channelPulseError=false;PU_CACHE=t;if(_et)PU_ETAG=_et;
+ /* 空守卫先于签名记账：无用户不写 PU，避免 state 恢复拍同文本早退。 */
+ renderChannelLamp();if(!(S&&S.users&&S.users.length))return;if(t===PU)return;PU=t;renderPulse(j);renderChannelLamp();
+}catch(e){PU_ETAG='';window._channelPulseError=true;renderChannelLamp();/* 失败拍作废 ETag；pulse 属「有则显示」，失败保持静默不制造假等待 */}}
 /* pulse 的失败保持静默不制造假等待；异常由全局渠道状态灯汇总。 */
 /* 采集和推送两个轮询独立写入来源计数，再合成同一个全局渠道灯。 */
 function renderPulseAlert(fails){window._ovCollectFails=fails||0;renderChannelLamp();}
-function renderPulse(j){if(!(S&&S.users&&S.users.length))return;/* 空配置守卫：删光用户后 10s 轮询不得复明 pulsecard（P2-4 回收的另一半——render 分支只封一拍，轮询每拍都会再点亮） */
- const rs=(j&&j.rounds)||[];
- if(!rs.length)return;
+function renderPulse(j){const rs=(j&&Array.isArray(j.rounds))?j.rounds:[];window._channelPulseHasRounds=rs.length>0;if(!rs.length){renderPulseAlert(0);return;}if(!(S&&S.users&&S.users.length)){renderPulseAlert(0);return;}/* 空配置守卫：删光用户后 10s 轮询不得复明 pulsecard（P2-4 回收的另一半——render 分支只封一拍，轮询每拍都会再点亮） */
  $('pulsecard').style.display='';
  const last=rs[rs.length-1];
  const chans={};let runs=0,oks=0,latSum=0,latN=0,failRounds=0;
