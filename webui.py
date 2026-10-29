@@ -25,12 +25,20 @@ from core.login_slots import LOGIN_SLOTS, LOGIN_SLOT_ORDER, slot_crawler
 from crawlers.base import CHANNEL_GATE, platform_lock
 from core.alerter import (Alerter, _qual_price, FLIGGY_TAX_PAD,
                           xchan_phantom_idx, NEAR_RATIO, _append_before_at)
+from core.intl import normalize_transfer_arrival_max
 from report import _rounds, recent_platform_flights, _daily_minima
 
 # 仓库根锚定（CWD 漂移免疫家族，与 main._SENT_PATH 同族收口）：
 # 与 main 同进程但 db/log/notify 读取曾按 CWD 解析——main 锚定后单向
 # 分叉，CWD 漂移时 sqlite3.connect 会在错误路径静默新建空库（写副作用）
 _ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def _route_arrival_max(route):
+    return normalize_transfer_arrival_max(
+        route.get("from_code", route.get("from")),
+        route.get("to_code", route.get("to")),
+        route.get("transfer_arrival_max", "02:00"))
 
 
 def _anchored(p, default):
@@ -5066,6 +5074,7 @@ body:has(#citypanel[style*="display: flex"]) .savebar{
 .cfgw-group-h span{font-size:10px;color:var(--mut)}
 .cfgw-gline{flex:1;height:1px;background:var(--line);min-width:20px}
 .cfgwatch-form{padding:12px;margin:0 0 12px;border:1px solid var(--line);border-radius:var(--r2);background:var(--srx-soft,var(--headbg))}
+.cwf-wsteps{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px}.cwf-wsteps span{padding:6px 10px;border-radius:18px;background:var(--card);color:var(--mut);font-size:11px}.cwf-wsteps .on{background:var(--blue);color:#fff}.cwf-wsteps .done{color:var(--green)}.cwizard{max-width:780px}.cwf-candidate{display:flex;width:100%;align-items:center;gap:12px;text-align:left;padding:9px;margin:5px 0;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--tx);cursor:pointer}.cwf-candidate span{flex:1;color:var(--mut);font-size:11px}.cwf-candidate.on{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)}
 .cfgwatch-form .cwf-hint{color:var(--mut)}
 .cfgwatch-form .btn2.primary{background:var(--fill);border-color:transparent;color:#fff}
 .cwf-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px 10px}
@@ -8223,7 +8232,7 @@ function render(){const s=S;
     const dth=dd?(dd.th||x.th.direct):x.th.direct;
     const tth=tp?(tp.th||x.th.transfer):x.th.transfer;
     kpis+=`<div class="dgroup"><div class="dlab">${dSlash(d)}${_exp.has(d)?' <span class="stoptag" title="监控日期已过期：过期航班无购买意义，扫描已跳过（渠道对过期查询会滚动返回其他日期航班，照常采集会把别的日期的价挂进过期日期）——曲线定格在最后真实数据">已过期·停采</span>':''}</div><div class="grid">`
-     +kpiCard('d',dd,dth,'直飞最低',dDl[d],d)+kpiCard('t',tp,tth,'中转最低·次日'+((tp&&tp.tam)||'02:00')+'前到达',dTl[d],d)
+     +kpiCard('d',dd,dth,'直飞最低',dDl[d],d)+kpiCard('t',tp,tth,'中转最低·'+((tp&&tp.tam)==='不限'?'不限到达时刻':'次日'+((tp&&tp.tam)||'02:00')+'前到达'),dTl[d],d)
      +`</div></div>`;}
   }else{
    /* 单日期过期航线同款徽标（多日期分支对齐）：跳采后该日期
@@ -8232,7 +8241,7 @@ function render(){const s=S;
    kpis=(_exp.has(_sd)?`<div class="dlab">${dSlash(_sd)} <span class="stoptag" title="监控日期已过期：过期航班无购买意义，扫描已跳过（渠道对过期查询会滚动返回其他日期航班，照常采集会把别的日期的价挂进过期日期）——曲线定格在最后真实数据">已过期·停采</span></div>`:'')
     +`<div class="grid">`
     +kpiCard('d',xd,td,'直飞最低',x.delta?x.delta.direct:null,_sd)
-    +kpiCard('t',xt,tt,'中转最低·次日'+((xt&&xt.tam)||'02:00')+'前到达',x.delta?x.delta.transfer:null,_sd)
+    +kpiCard('t',xt,tt,'中转最低·'+((xt&&xt.tam)==='不限'?'不限到达时刻':'次日'+((xt&&xt.tam)||'02:00')+'前到达'),x.delta?x.delta.transfer:null,_sd)
     +`</div>`;
   }
   /* 卡头 name/routesTxt 过 he()，与上方用户 pills 转义纪律对齐 */
@@ -10599,12 +10608,17 @@ document.addEventListener('click',ev=>{
  const act=t.closest('#montab-watch [data-wsact]');if(act){const a=act.getAttribute('data-wsact');if(a==='refresh')wsLoad(true);else if(a==='add'){WS.preview?wsAddPreview():wsAdd()}else if(a==='search')switchView('search');else if(a==='previewwatch')wsAddPreview();else if(a==='previewexit')wsExitPreview();return}
 });
 document.addEventListener('input',ev=>{
+ if(ev.target&&ev.target.id==='cwzTarget')CFG_WIZ.target=ev.target.value;
+ if(ev.target&&ev.target.id==='cwzReturn')CFG_WIZ.returnDate=ev.target.value;
  const f=ev.target.closest&&ev.target.closest('#montab-watch [data-wsf]');if(!f)return;
  const k=f.getAttribute('data-wsf');
  if(k==='q'){WS.q=f.value;wsRenderList();return}
  if(k==='pmin'||k==='pmax'){WS[k]=f.value;wsRenderList();return}
 });
 document.addEventListener('change',ev=>{
+ if(ev.target&&ev.target.id==='cwzRound'){const w=$('cwzReturnWrap');if(w)w.style.display=ev.target.checked?'':'none';if(!ev.target.checked){CFG_WIZ.returnDate='';const d=$('cwzReturn');if(d)d.value=''}}
+ if(ev.target&&ev.target.id==='cwzReturn')CFG_WIZ.returnDate=ev.target.value;
+ if(ev.target&&ev.target.id==='cwzStrong')CFG_WIZ.strong=!!ev.target.checked;
  const f=ev.target.closest&&ev.target.closest('#montab-watch [data-wsf]');if(!f)return;
  const k=f.getAttribute('data-wsf');if(k==='q')return;
  WS[k]=f.value;wsRenderList();
@@ -12862,7 +12876,7 @@ function cityPanelOpen(el){
  const p=$('citypanel');
  // Capture the previous scroll state only once, even if an async city-data
  // request or another trigger opens the already-visible panel again.
- if(p.style.display==='none')p.dataset.prevOverflow=document.body.style.overflow||'';
+if(p.style.display==='none')p.dataset.prevOverflow=document.body.style.overflow||'';
  if(_cpEl&&_cpEl!==el&&_cpEl.setAttribute)_cpEl.setAttribute('aria-expanded','false');
  _cpEl=el;
  p.style.display='flex';
@@ -13682,6 +13696,7 @@ const CFG_WATCH={user:'',list:[],edit:'',formUser:'',trend:{},confirm:'',busy:fa
  route:'',q:'',status:'',targetState:'',channel:'',addOpen:false,ft:null,
  mode:'route',notify:true,note:'',pickPrice:null,dirty:false,loading:false,loadedOnce:false,
  queued:false,retry:0,retryT:null};
+const CFG_WIZ={open:false,step:1,from:'',to:'',fromName:'',toName:'',dates:[],returnDate:'',rows:[],selected:'',task:'',target:'',strong:true,channels:[],more:{layoverMin:0,noCross:false,minBaggage:0}};
 function cfgWatchName(){
  const u=(CFG||[]).find(x=>x.name===CFG_WATCH.user)||(CFG||[])[OPEN_USER]||(CFG||[])[0];
  return u?String(u.name||''):'';
@@ -13689,6 +13704,26 @@ function cfgWatchName(){
 function cfgWatchUserObj(){return (CFG||[]).find(x=>x.name===cfgWatchName())||null}
 function cfgWatchRoutes(){const u=cfgWatchUserObj();return (u&&u.routes)||[]}
 function cfgWatchRoute(){const rs=cfgWatchRoutes();const i=+((($('cwRoute')||{}).value)||0);return rs[i]||null}
+async function cfgWatchWizardOpen(){
+ if(CFG_SAVE_FLIGHT)await CFG_SAVE_FLIGHT;
+ if(typeof cfgCoreDirty==='function'&&cfgCoreDirty())await saveCfg(true);
+ if(typeof cfgCoreDirty==='function'&&cfgCoreDirty()){toast('先完成当前配置自动保存，再开始添加关注','err');return}
+ CFG_WIZ.open=true;CFG_WIZ.step=1;CFG_WIZ.from='';CFG_WIZ.to='';CFG_WIZ.fromName='';CFG_WIZ.toName='';
+ CFG_WIZ.dates=[];CFG_WIZ.returnDate='';CFG_WIZ.rows=[];CFG_WIZ.selected='';CFG_WIZ.task='';CFG_WIZ.target='';CFG_WIZ.strong=true;
+ CFG_WIZ.channels=SRX_PLAT_KEYS.slice();CFG_WIZ.more={layoverMin:0,noCross:false,minBaggage:0};CFG_WATCH.addOpen=false;CFG_WATCH.edit='';cfgWatchRender();
+}
+function cfgWatchWizardHTML(){
+ if(!CFG_WIZ.open)return '';
+ const international=isIntlCode(CFG_WIZ.from)||isIntlCode(CFG_WIZ.to);
+ const steps=['航线','日期','航班','目标与提醒'];
+ const bar='<div class="cwf-modebar"><b>添加关注</b><span class="cwf-scope">四步完成，不需要先保存航线再回来选航班</span></div><div class="cwf-wsteps">'+steps.map((x,i)=>'<span class="'+(CFG_WIZ.step===i+1?'on':(CFG_WIZ.step>i+1?'done':''))+'">'+(i+1)+' '+x+'</span>').join('')+'</div>';
+ let body='';
+ if(CFG_WIZ.step===1)body='<div class="cwf-grid"><label class="cwf-field">出发城市<span class="cwf-citybox"><input id="cwzFrom" value="'+esc(CFG_WIZ.fromName)+'" data-code="'+esc(CFG_WIZ.from)+'" data-name="'+esc(CFG_WIZ.fromName)+'" autocomplete="off" placeholder="中文 / 拼音 / 三字码" aria-label="出发城市" role="combobox" aria-expanded="false" onfocus="cwCityFocus(this)" onclick="cwCityFocus(this)" oninput="cwCityInput(this)" onkeydown="cwCityKey(event,this)" onchange="cwCityChanged(this)"><div class="cwf-citydrop" id="cwzFromDrop" role="listbox" hidden></div></span></label><label class="cwf-field">到达城市<span class="cwf-citybox"><input id="cwzTo" value="'+esc(CFG_WIZ.toName)+'" data-code="'+esc(CFG_WIZ.to)+'" data-name="'+esc(CFG_WIZ.toName)+'" autocomplete="off" placeholder="中文 / 拼音 / 三字码" aria-label="到达城市" role="combobox" aria-expanded="false" onfocus="cwCityFocus(this)" onclick="cwCityFocus(this)" oninput="cwCityInput(this)" onkeydown="cwCityKey(event,this)" onchange="cwCityChanged(this)"><div class="cwf-citydrop" id="cwzToDrop" role="listbox" hidden></div></span></label></div><div class="cwf-quick"><button type="button" data-cwzpair="SHA|LHR|上海|伦敦">伦敦 · 国际</button><button type="button" data-cwzpair="SHA|JFK|上海|纽约">纽约 · 国际</button><button type="button" data-cwzpair="SHA|NRT|上海|东京">东京 · 国际</button><button type="button" data-cwzpair="PEK|KIX|北京|大阪">大阪 · 国际</button><button type="button" data-cwzpair="SHA|SYX|上海|三亚">三亚</button></div><div class="cw-meta">'+(international?'<b>国际航线 · 按城市码自动识别</b><br>人民币含税总价比较；起降时间按当地时间，跨天最多 +7 天。':'国内航线 · 按城市码自动识别，价格以人民币显示。')+'</div><label class="cwf-switch"><input id="cwzRound" type="checkbox" '+(CFG_WIZ.returnDate?'checked':'')+'> 往返（可选返程日期）</label><label class="cwf-field" id="cwzReturnWrap" style="'+(CFG_WIZ.returnDate?'':'display:none')+'">返程日期<input id="cwzReturn" type="date" value="'+esc(CFG_WIZ.returnDate)+'"></label>';
+ else if(CFG_WIZ.step===2)body='<div class="cwf-grid"><label class="cwf-field">添加出发日期<input id="cwzDate" type="date" min="'+_todayISO()+'"></label><label class="cwf-field">连续日期范围到<input id="cwzDateEnd" type="date" min="'+_todayISO()+'"></label></div><button type="button" class="btn2" data-cwzdateadd="1">添加日期 / 区间</button><div class="cw-meta">连续日期会按区间添加；最多 14 个出发日。'+(CFG_WIZ.dates.length?'<div class="cwf-quick">'+CFG_WIZ.dates.map(d=>'<button type="button" data-cwzdate="'+esc(d)+'">'+esc(d)+' ×</button>').join('')+'</div>':'')+'</div>';
+ else if(CFG_WIZ.step===3){const rows=CFG_WIZ.rows||[];body='<div class="cwf-pick"><div class="cwf-pick-h"><b>实时查询航班</b><span id="cwzStatus">'+(CFG_WIZ.task?'正在查询…':(rows.length?'找到 '+rows.length+' 条真实结果':'点击查询；不必等待下一轮定时扫描'))+'</span><span class="sp"></span><button type="button" class="btn2 primary" data-cwzprobe="1" '+(CFG_WIZ.task?'disabled':'')+'>立即查询</button></div>'+rows.map((f,i)=>{const k=String(f.rowKey||f.id||i),sel=CFG_WIZ.selected===k;return '<button type="button" class="cwf-candidate '+(sel?'on':'')+'" data-cwzrow="'+esc(k)+'"><b>'+esc(f.code||f.name||'航班')+'</b><span>'+esc(f.routeLabel||'')+' '+esc(f.depTime||'')+' → '+esc(f.arrTime||'')+(f.transCity?' · 经 '+esc(f.transCity):'')+'</span><strong>¥'+esc(String(f.price||''))+'</strong></button>'}).join('')+'<div class="cw-meta">默认关注整条航线。点选一个航班可额外关注该航班；查询无结果也可先保存航线。</div></div>'}
+ else{const prices=(CFG_WIZ.rows||[]).map(x=>Number(x.price)).filter(x=>x>0),low=prices.length?Math.min(...prices):0;body='<div class="cwf-grid"><label class="cwf-field">目标价（人民币）<input id="cwzTarget" type="number" min="0" step="10" value="'+esc(CFG_WIZ.target)+'" placeholder="留空=只关注航线"></label><div class="cwf-field">快捷目标价<div class="cwf-quick">'+(low?'<button type="button" data-cwztarget="'+Math.round(low)+'">最低 ¥'+Math.round(low)+'</button><button type="button" data-cwztarget="'+Math.round(low*.95)+'">低 5%</button><button type="button" data-cwztarget="'+Math.round(low*.9)+'">低 10%</button>':'查询后显示价格预设')+'</div></div></div><label class="cwf-switch"><input id="cwzStrong" type="checkbox" '+(CFG_WIZ.strong?'checked':'')+'> 目标达标时强提醒</label><details class="cw-meta"><summary>更多筛选条件（选填）</summary><div class="cwf-grid"><label class="cwf-field">中转最短衔接（分钟）<input id="cwzLay" type="number" min="0" step="10" value="0" placeholder="0=不限"></label><label class="cwf-field">国际免费行李（kg）<input id="cwzBag" type="number" min="0" step="5" value="0" placeholder="0=不限"></label><label class="cwf-switch"><input id="cwzNoCross" type="checkbox"> 排除跨天</label></div></details><div class="cw-meta">'+(international?'国际航线的中转到达默认不限时刻；国内路径保持原筛选规则。':'已按航线类型使用对应默认值。')+'</div>'}
+ return '<section class="cfgwatch-form cwizard" id="cwWizard">'+bar+body+'<div class="cwf-foot">'+(CFG_WIZ.step>1?'<button type="button" class="btn2" data-cwzback="1">上一步</button>':'')+'<span class="sp"></span>'+(CFG_WIZ.step<4?'<button type="button" class="btn2 primary" data-cwznext="1">下一步</button>':'<button type="button" class="btn2 primary" data-cwzsave="1">开始关注</button>')+'<button type="button" class="btn2" data-cwzcancel="1">取消</button></div><div class="cwf-hint" id="cwzHint"></div></section>';
+}
 function cfgWatchState(w){
  if(w.active===false)return {cls:'pause',text:'已暂停'};
  if(srxWatchExpired(w))return {cls:'out',text:'已过期'};
@@ -14091,9 +14126,9 @@ function cfgWatchRender(){
  const mode=CFG_WATCH.mode||'route';
  const form='<div class="cfgwatch-toolbar"><span class="cw-lab cwUserLab">用户</span><select id="cwUser" onchange="cfgWatchUserSet(this.value)">'+users+'</select>'
   +'<span class="cw-sum"><b>'+CFG_WATCH.list.length+'</b> 个关注 · <b>'+CFG_WATCH.list.filter(w=>w.active!==false&&w.inScope).length+'</b> 个监控中</span><span class="cw-sp"></span>'
-  +'<button class="btn2 primary" type="button" data-cwact="add"'+(CFG_WATCH.addOpen||CFG_WATCH.edit?' style="display:none"':'')+'>＋ 添加关注航班</button><button class="btn2" type="button" onclick="cfgWatchRefresh()">刷新清单</button></div>'
+  +'<button class="btn2 primary" type="button" data-cwact="wizard"'+(CFG_WATCH.addOpen||CFG_WATCH.edit||CFG_WIZ.open?' style="display:none"':'')+'>＋ 添加关注</button><button class="btn2" type="button" data-cwact="add"'+(CFG_WATCH.addOpen||CFG_WATCH.edit||CFG_WIZ.open?' style="display:none"':'')+'>按已有航线添加</button><button class="btn2" type="button" onclick="cfgWatchRefresh()">刷新清单</button></div>'
   +cfgWatchRouteChipsHTML()+cfgWatchFilterBarHTML()
-  +'<details class="cw-meta" style="margin:8px 0"><summary>如何关注国际航班？</summary><p>① 在「用户与航线」添加出发地、目的地和出发日期（国内、国际操作一样），完成后自动保存。</p><p>② 回到这里点击「添加关注航班」，选择该航线和日期；可以从采集结果选航班，也可以手动填写航班号与起降时刻。</p><p>③ 按需设置目标价和渠道，点击「加入监控」。没有采集结果时，先完成航线设置并等待扫描。</p><button type="button" class="btn2" onclick="goWatchRouteSetup()">去添加航线</button></details>'
+  +'<details class="cw-meta" style="margin:8px 0"><summary>如何关注国际航班？</summary><p>点「添加关注」按航线、日期、实时航班、目标价四步完成；国际航线按三字码自动识别，默认不限中转到达时刻。</p><p>旧航线仍可用「按已有航线添加」或编辑入口。</p></details>'
   +'<div class="cfgwatch-form" id="cwForm" style="'+((CFG_WATCH.addOpen||CFG_WATCH.edit)?'':'display:none')+'">'
   +'<div class="cwf-modebar"><div class="cwf-mode" role="group" aria-label="航线来源"><button type="button" class="'+(mode==='route'?'on':'')+'" data-cwmode="route">已配置航线</button>'+(CFG_WATCH.edit?'<button type="button" class="'+(mode==='custom'?'on':'')+'" data-cwmode="custom">历史身份</button>':'')+'</div><span class="cwf-scope" id="cwScope">关注航班必须是该航线+日期明细中的指定航班</span></div>'
   +'<div id="cwRouteFields" style="'+(mode==='custom'?'display:none':'')+'"><div class="cwf-grid"><label class="cwf-field cwf-route">关注航线<select id="cwRoute" onchange="cfgWatchFormRefresh()">'+(rs.length?rs.map((r,i)=>'<option value="'+i+'">'+esc((r.from_name||r.from||'')+'→'+(r.to_name||r.to||''))+'</option>').join(''):'<option value="">未配置航线</option>')+'</select></label>'
@@ -14112,7 +14147,7 @@ function cfgWatchRender(){
   +'<div class="cwf-chans"><span>监控渠道 <em class="muted" style="font-style:normal">关注航班渠道</em></span><span id="cwChannels">'+SRX_PLAT_KEYS.map(p=>'<label class="cwf-chip" style="--pc:'+SRX_PLATS[p][1]+'"><input type="checkbox" value="'+p+'" checked>'+srxPlatIcon(p)+esc(SRX_PLATS[p][0])+'</label>').join('')+'</span></div>'
   +'<div class="cwf-switches"><label class="cwf-switch"><input id="cwActive" type="checkbox" checked> 启用监控</label><label class="cwf-switch"><input id="cwNotify" type="checkbox" checked> 目标达标提醒</label><span class="cwf-hint" id="cwPickPreview">价格/历史只读真实落库行；渠道勾选决定比价与目标口径。</span></div>'
   +'<div class="cwf-foot"><button class="btn2 primary" type="button" id="cwSubmit" onclick="cfgWatchSubmit()">加入监控</button><button class="btn2" type="button" data-cwpreview="1">试看该航班历史</button><button class="btn2" type="button" id="cwCancel" onclick="cfgWatchReset()">取消</button><span class="cwf-hint" id="cwHint">关注航班是配置关注航线+日期明细集合中的指定航班子集；日期/渠道/目标独立保存。</span></div></div>';
- box.innerHTML=form+(CFG_WATCH.err?'<div class="cw-meta warn">'+esc(CFG_WATCH.err)+'</div>':'')+'<div id="cfgWatchList" class="cfgwatch-list"></div>';
+ box.innerHTML=form+cfgWatchWizardHTML()+(CFG_WATCH.err?'<div class="cw-meta warn">'+esc(CFG_WATCH.err)+'</div>':'')+'<div id="cfgWatchList" class="cfgwatch-list"></div>';
  document.body.classList.toggle('cwform-open',!!(CFG_WATCH.addOpen||CFG_WATCH.edit));
  cfgWatchFormRefresh();
  if(CFG_WATCH.route){
@@ -14258,6 +14293,83 @@ function cfgWatchAddOpen(){
  }
  setTimeout(()=>{const e=$('cwRoute');if(e)e.focus();else{const c=$('cwFromCity');if(c)c.focus()}},0);
 }
+function cfgWizardHint(msg){const e=$('cwzHint');if(e)e.textContent=msg||''}
+function cfgWizardSyncCities(){
+ const f=$('cwzFrom'),t=$('cwzTo');CFG_WIZ.from=f?String(cwCityCode(f)||'').toUpperCase():CFG_WIZ.from;CFG_WIZ.to=t?String(cwCityCode(t)||'').toUpperCase():CFG_WIZ.to;
+ CFG_WIZ.fromName=f?cwCityName(f):CFG_WIZ.fromName;CFG_WIZ.toName=t?cwCityName(t):CFG_WIZ.toName;
+}
+function cfgWizardNext(){
+ if(CFG_WIZ.step===1){cfgWizardSyncCities();if(!/^[A-Z]{3}$/.test(CFG_WIZ.from)||!/^[A-Z]{3}$/.test(CFG_WIZ.to)){cfgWizardHint('请从城市建议中选择有效机场；也可输入 IATA 三字码。');return}
+  const rt=$('cwzRound'),rd=$('cwzReturn');CFG_WIZ.returnDate=rt&&rt.checked&&rd?rd.value:'';
+  if(rt&&rt.checked&&!CFG_WIZ.returnDate){cfgWizardHint('往返行程需要选择返程日期。');return}
+  if(CFG_WIZ.returnDate&&CFG_WIZ.returnDate<_todayISO()){cfgWizardHint('返程日期不能早于今天。');return}}
+ if(CFG_WIZ.step===2){if(!CFG_WIZ.dates.length){cfgWizardHint('至少添加一个出发日期。');return}}
+ CFG_WIZ.step=Math.min(4,CFG_WIZ.step+1);cfgWatchRender();
+}
+function cfgWizardAddDates(){
+ const a=$('cwzDate'),b=$('cwzDateEnd'),start=a&&a.value,end=b&&b.value||start;
+ if(!start){cfgWizardHint('请先选择开始日期。');return}
+ if(start<_todayISO()||end<start){cfgWizardHint('日期范围无效或早于今天。');return}
+ const max=CFG_WIZ.returnDate?10:14,d0=new Date(start+'T12:00:00'),d1=new Date(end+'T12:00:00'),add=[];
+ for(let d=new Date(d0);d<=d1;d.setDate(d.getDate()+1)){add.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));if(add.length>max)break}
+ CFG_WIZ.dates=[...new Set([...CFG_WIZ.dates,...add])].sort();if(CFG_WIZ.dates.length>max){CFG_WIZ.dates=CFG_WIZ.dates.slice(0,max);cfgWizardHint('最多关注 '+max+' 个出发日。')};cfgWatchRender();
+}
+function cfgWizardPlans(){
+ const plans=CFG_WIZ.dates.map(date=>({from:CFG_WIZ.from,to:CFG_WIZ.to,date}));
+ if(CFG_WIZ.returnDate)plans.push({from:CFG_WIZ.to,to:CFG_WIZ.from,date:CFG_WIZ.returnDate});
+ return plans;
+}
+async function cfgWizardProbe(){
+ cfgWizardSyncCities();if(!CFG_WIZ.dates.length)return cfgWizardHint('先添加日期。');
+ const legs=cfgWizardPlans();
+ const user=cfgWatchUserObj(),plats=(user&&user.platforms||SRX_PLAT_KEYS).filter(p=>SRX_PLAT_KEYS.includes(p));
+ const btn=document.querySelector('[data-cwzprobe]');if(btn)btn.disabled=true;cfgWizardHint('正在向渠道发起实时查询…');
+ try{const r=await fetch('/api/probe/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({legs,plats})});const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.err||'查询启动失败');
+  const id=String(j.task.id),rows=[];CFG_WIZ.task=id;
+  for(let n=0;n<120;n++){
+   await new Promise(resolve=>setTimeout(resolve,1500));const q=await fetch('/api/probe/task?id='+encodeURIComponent(id)+'&rows_from='+rows.length,{cache:'no-store'});const v=await q.json();if(!q.ok||!v.ok)throw new Error(v.err||'查询进度读取失败');
+   rows.push(...(v.rows||[]));CFG_WIZ.rows=rows;cfgWatchRender();
+   if(['done','cancelled','error'].includes(v.status)){CFG_WIZ.task='';cfgWizardHint('实时查询完成：'+rows.length+' 条航班结果。');return}
+  }
+  CFG_WIZ.task='';cfgWizardHint('查询仍在运行。可稍后重试，已收到 '+rows.length+' 条结果。');
+ }catch(e){CFG_WIZ.task='';cfgWizardHint('查询失败：'+(e.message||e));cfgWatchRender()}
+}
+async function cfgWizardSave(){
+ if(CFG_SAVE_FLIGHT)await CFG_SAVE_FLIGHT;
+ cfgWizardSyncCities();const userName=cfgWatchName(),user=CFG.find(u=>u.name===userName);if(!user)return cfgWizardHint('找不到当前用户。');
+ const dates=[...CFG_WIZ.dates].sort();if(!dates.length)return cfgWizardHint('至少需要一个出发日期。');
+ const intl=isIntlCode(CFG_WIZ.from)||isIntlCode(CFG_WIZ.to),target=Math.max(0,Number(($('cwzTarget')||{}).value)||0),strong=!!(($('cwzStrong')||{}).checked);
+ CFG_WIZ.target=target?String(target):'';CFG_WIZ.strong=strong;
+ const route={from:CFG_WIZ.from,to:CFG_WIZ.to,from_name:CFG_WIZ.fromName||CFG_WIZ.from,to_name:CFG_WIZ.toName||CFG_WIZ.to,dates,ret_date:CFG_WIZ.returnDate||'',alert_direct:target,alert_transfer:target,transfer_arrival_max:intl?'不限':'02:00',transfer_layover_min:Number(($('cwzLay')||{}).value)||0,min_baggage:Number(($('cwzBag')||{}).value)||0,no_cross:!!(($('cwzNoCross')||{}).checked)};
+ user.routes=user.routes||[];const routesAdded=[route];user.routes.push(route);
+ if(CFG_WIZ.returnDate){const back=Object.assign({},route,{from:route.to,to:route.from,from_name:route.to_name,to_name:route.from_name,dates:[CFG_WIZ.returnDate],ret_date:''});routesAdded.push(back);user.routes.push(back)}
+ const row=(CFG_WIZ.rows||[]).find((x,i)=>String(x.rowKey||x.id||i)===CFG_WIZ.selected);let wizardWatch=null;
+ if(row){const plans=cfgWizardPlans();
+  const plan=plans[Number(row.leg)||0]||plans[0];wizardWatch={from:plan.from,to:plan.to,date:plan.date,code:row.code||row.name,depTime:row.depTime,arrTime:row.arrTime,trans:row.transCity||'',cross:row.crossDayDesc||'',stop:!!row.stop,cabin:row.cabin||'',channels:CFG_WIZ.channels,target:target||null,active:true,notify:strong,note:''};}
+ const saveBtn=document.querySelector('[data-cwzsave]');if(saveBtn)saveBtn.disabled=true;
+ const txid=Array.from({length:4},()=>Math.floor(Math.random()*4294967296).toString(16).padStart(8,'0')).join('');
+ const sentCfg=JSON.stringify(CFG),sentGlb=JSON.stringify(GLB),sentRevision=CFG_REVISION;
+ const pending=fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({users:JSON.parse(sentCfg),globals:JSON.parse(sentGlb),revision:sentRevision,wizard_user:userName,wizard_watch:wizardWatch,wizard_txid:txid})});
+ CFG_SAVE_FLIGHT=pending;
+ try{const r=await pending;const j=await r.json();if(!r.ok||!j.ok){const err=new Error(j.err||'保存失败');err.status=r.status;throw err;}
+  CFG_CLEAN=sentCfg;GLB_CLEAN=sentGlb;CFG_REVISION=j.revision||CFG_REVISION;CFG_WIZ.open=false;CFG_WATCH.loadedAt=0;CFG_WATCH.addOpen=false;cfgWatchRender();loadCfgWatch(true);toast(row?'航线和指定航班已开始关注':'航线已开始关注','ok');if(j.reload_warning)toast('已保存，但运行时热重载失败：'+j.reload_warning,'err');
+ }catch(e){
+  if(e && e.status>=400 && e.status<500){
+   for(const added of routesAdded){const i=user.routes.indexOf(added);if(i>=0)user.routes.splice(i,1)}
+   if(saveBtn)saveBtn.disabled=false;cfgWizardHint((e.message||'保存被拒绝')+'；请核对后重试。');
+  }else{
+   let receipt=null;
+   for(let attempt=0;attempt<6;attempt++){
+    try{const rr=await fetch('/api/config/wizard-result?txid='+encodeURIComponent(txid),{cache:'no-store'});const rj=await rr.json();if(rr.ok&&rj.ok&&rj.saved){receipt=rj;break}}
+    catch(_receiptError){}
+    await new Promise(resolve=>setTimeout(resolve,250));
+   }
+   if(receipt){CFG_CLEAN=sentCfg;GLB_CLEAN=sentGlb;CFG_REVISION=receipt.revision||CFG_REVISION;CFG_WIZ.open=false;CFG_WATCH.loadedAt=0;CFG_WATCH.addOpen=false;cfgWatchRender();loadCfgWatch(true);toast(row?'航线和指定航班已开始关注':'航线已开始关注','ok');if(receipt.reload_warning)toast('已保存，但运行时热重载失败：'+receipt.reload_warning,'err');}
+   else{for(const added of routesAdded){const i=user.routes.indexOf(added);if(i>=0)user.routes.splice(i,1)}if(saveBtn)saveBtn.disabled=false;cfgWizardHint('保存状态暂时无法确认，已保留向导填写内容。请刷新查看是否已添加；如未添加，可再提交一次。');}
+  }
+  if(e && e.status)console.warn('add-watch save response',e.status,e.message||'');
+ }finally{if(CFG_SAVE_FLIGHT===pending)CFG_SAVE_FLIGHT=null;}
+}
 function cfgWatchToggle(id){const w=CFG_WATCH.list.find(x=>x.id===id);if(!w)return;
  fetch('/api/srx/watch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:cfgWatchName(),op:'update',id,patch:{active:w.active===false}})})
  .then(r=>r.json()).then(j=>{if(!j.ok)throw new Error(j.err||'更新失败');CFG_WATCH.list=j.watches||CFG_WATCH.list;cfgWatchRender();
@@ -14307,6 +14419,16 @@ function cfgWatchRemove(id){
 }
 document.addEventListener('click',ev=>{
  if(!ev.target.closest)return;
+ const wz=ev.target.closest('#cfgWatch [data-cwznext]');if(wz){cfgWizardNext();return}
+ if(ev.target.closest('#cfgWatch [data-cwzback]')){CFG_WIZ.step=Math.max(1,CFG_WIZ.step-1);cfgWatchRender();return}
+ if(ev.target.closest('#cfgWatch [data-cwzcancel]')){CFG_WIZ.open=false;cfgWatchRender();return}
+ if(ev.target.closest('#cfgWatch [data-cwzdateadd]')){cfgWizardAddDates();return}
+ if(ev.target.closest('#cfgWatch [data-cwzprobe]')){cfgWizardProbe();return}
+ if(ev.target.closest('#cfgWatch [data-cwzsave]')){cfgWizardSave();return}
+ const pair=ev.target.closest('#cfgWatch [data-cwzpair]');if(pair){const q=pair.getAttribute('data-cwzpair').split('|'),f=$('cwzFrom'),t=$('cwzTo');if(f)cwSetCity(f,q[0],q[2]);if(t)cwSetCity(t,q[1],q[3]);cfgWizardSyncCities();cfgWatchRender();return}
+ const wzdate=ev.target.closest('#cfgWatch [data-cwzdate]');if(wzdate){CFG_WIZ.dates=CFG_WIZ.dates.filter(d=>d!==wzdate.getAttribute('data-cwzdate'));cfgWatchRender();return}
+ const wzrow=ev.target.closest('#cfgWatch [data-cwzrow]');if(wzrow){CFG_WIZ.selected=wzrow.getAttribute('data-cwzrow');cfgWatchRender();return}
+ const wzt=ev.target.closest('#cfgWatch [data-cwztarget]');if(wzt){const e=$('cwzTarget');if(e)e.value=wzt.getAttribute('data-cwztarget');CFG_WIZ.target=wzt.getAttribute('data-cwztarget');return}
  const wr=ev.target.closest('[data-wsrouteview]');if(wr){monRouteOpen(+wr.getAttribute('data-wsrouteview'));return}
  const mrt=ev.target.closest('[data-mroute]');if(mrt){monRouteOpen(+mrt.getAttribute('data-mroute'));return}
  const g=ev.target.closest('[data-gowatch]');if(g){switchView('cfg');showCfgPanel('watch');return}
@@ -14332,6 +14454,7 @@ document.addEventListener('click',ev=>{
  else if(act==='toggle')cfgWatchToggle(id);
  else if(act==='remove')cfgWatchRemove(id);
  else if(act==='add')cfgWatchAddOpen();
+ else if(act==='wizard')cfgWatchWizardOpen();
  else if(act==='resetfilters')cfgWatchResetFilters();
 });
 document.addEventListener('input',ev=>{
@@ -14352,6 +14475,7 @@ document.addEventListener('change',ev=>{
    曾吞标签破排版；数据源是本机 config/自导入文件，硬收自伤面） */
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
 let OPEN_USER=0;
+const ROUTE_ARRIVAL_AUTO=Symbol('route-arrival-auto-default');
 try{const _ou=JSON.parse(localStorage.getItem('jpcfguseropen'));
  if(typeof _ou==='number')OPEN_USER=_ou;}catch(e){}
 function setOpenUser(v){OPEN_USER=v;
@@ -14808,7 +14932,7 @@ function buildForm(){if(!CFG)return;let h='',gh='';
      <span class="chip schip" title="清空本条航线的全部筛选约束（心理价与日期保留）" onclick="applyRoutePreset(${i},${j},'clear',this)">清空筛选</span>
     </div>
     ${(_rtOn(r)||r.direct_only)?'':`<div class="rfgrp">中转与衔接</div>
-    <div class="srow"><div class="slab"><b>中转最晚到达</b><div class="shint">次日该时刻前到达的中转才算达标；当日达不受此限；跨天国际段按到达当地钟面判</div></div><div class="sctl"><input type="time" value="${esc(r.transfer_arrival_max||'02:00')}" onchange="setRoute(${i},${j},'transfer_arrival_max',this.value)"></div></div>
+    <div class="srow"><div class="slab"><b>中转最晚到达</b><div class="shint">国际航线默认不限；设定时按到达当地时间筛选，当日达不受此限。旧配置缺少此项仍按 02:00</div></div><div class="sctl"><select aria-label="中转最晚到达限制" onchange="setRouteArrivalChoice(${i},${j},this.value)">${(isIntlCode(r.from)||isIntlCode(r.to))?`<option value="不限" ${(r.transfer_arrival_max==='不限')?'selected':''}>不限</option>`:''}<option value="02:00" ${(r.transfer_arrival_max||'02:00')==='02:00'||(!(isIntlCode(r.from)||isIntlCode(r.to))&&r.transfer_arrival_max==='不限')?'selected':''}>02:00</option><option value="04:00" ${r.transfer_arrival_max==='04:00'?'selected':''}>04:00</option><option value="06:00" ${r.transfer_arrival_max==='06:00'?'selected':''}>06:00</option><option value="custom" ${r.transfer_arrival_max&&r.transfer_arrival_max!=='不限'&&!['02:00','04:00','06:00'].includes(r.transfer_arrival_max)?'selected':''}>自定义</option></select>${r.transfer_arrival_max&&r.transfer_arrival_max!=='不限'&&!['02:00','04:00','06:00'].includes(r.transfer_arrival_max)?`<input type="time" value="${esc(r.transfer_arrival_max)}" onchange="setRoute(${i},${j},'transfer_arrival_max',this.value)">`:''}</div></div>
     <div class="srow"><div class="slab"><b>中转衔接窗口</b><div class="shint">最短/最长衔接；需托运建议 ≥90 分钟。两头可单填，0/空=不限；未知衔接按不满足/不误杀分别处理</div></div><div class="sctl"><span class="sunit">最短</span><input type="number" min="0" step="10" style="width:78px" value="${esc(r.transfer_layover_min||0)}" onchange="setRoute(${i},${j},'transfer_layover_min',this.value)"><span class="sunit">– 最长</span><input type="number" min="0" step="10" style="width:78px" value="${esc(r.transfer_layover_max||0)}" onchange="setRoute(${i},${j},'transfer_layover_max',this.value)"><span class="sunit">分钟</span></div></div>`}
     <div class="rfgrp">航司与行程</div>
     <div class="srow airrow"><div class="slab"><b>航司白名单</b><div class="shint"><b>东航 = 东方航空 = MU</b>：码 / 全称 / 简称 三写法等价。点常用 chip 或直接输入，下方即时解析；<b>! 前缀排除</b>（如 <b>!9C,!春秋</b> 只剔这两家）；留空=不限</div></div><div class="sctl airbox"><div class="airfield"><span class="airmode" id="airmode-${i}-${j}" role="group" aria-label="快捷添加航司模式"><span class="on" data-m="in" role="button" tabindex="0" onclick="airMode(${i},${j},'in',this)" onkeydown="if(event.key==='Enter')airMode(${i},${j},'in',this)">只看</span><span data-m="out" role="button" tabindex="0" onclick="airMode(${i},${j},'out',this)" onkeydown="if(event.key==='Enter')airMode(${i},${j},'out',this)">排除</span></span><input type="text" placeholder="如 MU,东航,!9C" title="东航=东方航空=MU；码 / 全称 / 简称三写法等价；! 前缀=排除" style="width:100%;text-align:left" value="${esc(r.airlines||'')}" onchange="setRoute(${i},${j},'airlines',this.value);airCloseSug(${i},${j})" oninput="airPreview(${i},${j},this)" onblur="airBlur(${i},${j})" onkeydown="airKey(event,${i},${j},this)" aria-label="航司白名单表达式" autocomplete="off"></div><div class="airsug" id="airsug-${i}-${j}"></div><div class="airquick"><span class="aq-lab">常用</span>${_airQuickHTML(i,j)}</div><div class="airchips" id="airchips-${i}-${j}">${airChipsHTML(r.airlines||'',i,j)}</div><div class="airpv" id="airpv-${i}-${j}"${airHasUnknown(r.airlines||'')?"":' style="display:none"'}>${airHasUnknown(r.airlines||'')?airPreviewHTML(r.airlines||''):''}</div></div></div>
@@ -15423,7 +15547,8 @@ function _rfCount(r){let n=0;
  if(r.price_max>0)n++;if(r.max_duration_h>0)n++;
  if(r.no_cross)n++;if(r.exclude_stop)n++;if(r.exclude_share)n++;
  if(r.transfer_layover_min>0||r.transfer_layover_max>0)n++;
- if(r.transfer_arrival_max&&r.transfer_arrival_max!=='02:00')n++;
+ if(r.transfer_arrival_max&&r.transfer_arrival_max!=='02:00'
+  &&!(r.transfer_arrival_max==='不限'&&!(isIntlCode(r.from)||isIntlCode(r.to))))n++;
  if(r.direct_only)n++;
  return n;}
 function _rfSummary(r){const out=[];
@@ -15445,7 +15570,8 @@ function _rfSummary(r){const out=[];
  if(r.transfer_baggage==='direct')out.push('联运直挂');
  if(r.widebody_only)out.push('仅大机型');
  if(r.direct_only)out.push('只要直飞');
- if(r.transfer_arrival_max&&r.transfer_arrival_max!=='02:00')
+ if(r.transfer_arrival_max==='不限'&&(isIntlCode(r.from)||isIntlCode(r.to)))out.push('中转到达不限');
+ else if(r.transfer_arrival_max&&r.transfer_arrival_max!=='02:00'&&r.transfer_arrival_max!=='不限')
   out.push('次日≤'+r.transfer_arrival_max);
  return out.length?out.slice(0,4).join(' · ')+(out.length>4?' +'+(out.length-4):''):'默认不限';}
 function syncFilterHead(i,j){const r=CFG[i]&&CFG[i].routes&&CFG[i].routes[j];if(!r)return;
@@ -15716,16 +15842,29 @@ function cfgCityLookup(v){
  if(INTLN[t])return {code:INTLN[t],name:t};
  return {code:'',name:t};
 }
-function setRoute(i,j,k,v){CFG[i].routes[j][k]=_coerce(CFG[i].routes[j][k],v);
+function setRoute(i,j,k,v){const _route=CFG[i].routes[j];_route[k]=_coerce(_route[k],v);
  if(k==='from_name'||k==='to_name'){const r=CFG[i].routes[j];
   const a=cfgCityLookup(r.from_name),b=cfgCityLookup(r.to_name);
   if(a.code){r.from=a.code;r.from_name=a.name}
   if(b.code){r.to=b.code;r.to_name=b.name}}
+ if(k==='from_name'||k==='to_name'||k==='from'||k==='to'){
+  const _intlRoute=isIntlCode(_route.from)||isIntlCode(_route.to);
+  if(_route[ROUTE_ARRIVAL_AUTO])_route.transfer_arrival_max=_intlRoute?'不限':'02:00';
+  else if(!_intlRoute&&_route.transfer_arrival_max==='不限')_route.transfer_arrival_max='02:00';
+ }
+ if(k==='transfer_arrival_max')delete _route[ROUTE_ARRIVAL_AUTO];
  if(k==='from_name'||k==='to_name'||k==='from'||k==='to'
    ||k==='alert_direct'||k==='alert_transfer'
    ||k==='dep_time_min'||k==='dep_time_max'||k==='arr_time_min'
    ||k==='arr_time_max'||k==='ret_date')syncRouteHead(i,j);
  syncFilterHead(i,j);}
+function setRouteArrivalChoice(i,j,v){
+ if(v==='custom'){
+  const old=CFG[i].routes[j].transfer_arrival_max||'02:00';
+  CFG[i].routes[j].transfer_arrival_max=old==='不限'?'02:00':old;
+ }else CFG[i].routes[j].transfer_arrival_max=v;
+ delete CFG[i].routes[j][ROUTE_ARRIVAL_AUTO];
+ buildForm();}
 /* 特价订阅（r319）：单条 specials[0] 承载。首触建档（未配置用户
    零键零打扰——GET/POST verbatim 往返不留垃圾键）；布尔直存、数值
    归一（空串留空=后端缺省），字符串原样。 */
@@ -15956,7 +16095,7 @@ async function testPush(i,b){b=b||_evtT();
    :'❌ 推送失败：'+(j.err||'请检查 Webhook 与加签密钥');}
  catch(e){$('cfgmsg').textContent='❌ 请求失败: '+e;}
  b.classList.remove('busy');}
-function addUser(){setOpenUser(CFG.length);CFG.push({name:'新用户',routes:[{from:'SHA',from_name:'上海',to:'SYX',to_name:'三亚',dates:[defDate()],alert_direct:0,alert_transfer:0,transfer_arrival_max:'02:00'}],platforms:['qunar','fliggy','tongcheng','tuniu'],notifier:{digest:true,storm_repeat:3,win_toast:true,dingtalk:{enabled:false,webhook:'',secret:'',at_mobile:''}}});buildForm();
+function addUser(){setOpenUser(CFG.length);CFG.push({name:'新用户',routes:[{from:'SHA',from_name:'上海',to:'SYX',to_name:'三亚',dates:[defDate()],alert_direct:0,alert_transfer:0,transfer_arrival_max:'02:00'}],platforms:['qunar','fliggy','tongcheng','tuniu'],notifier:{digest:true,storm_repeat:3,win_toast:true,dingtalk:{enabled:false,webhook:'',secret:'',at_mobile:''}}});CFG[CFG.length-1].routes[0][ROUTE_ARRIVAL_AUTO]=true;buildForm();
  flashEl(document.querySelectorAll('#cfgform .ucard')[CFG.length-1]);}
 function delUser(i,b){const u=CFG[i]||{};
  armConfirm(b||_evtT(),()=>{CFG.splice(i,1);
@@ -15973,7 +16112,7 @@ function delUser(i,b){const u=CFG[i]||{};
   {title:'删除用户？',
    message:'将删除「'+(u.name||'')+'」的全部关注航线、心理价与通知配置。\n保存配置后生效；保存前可通过「放弃更改」撤回。',
    label:'删除用户'});}
-function addRoute(i){CFG[i].routes.push({from:'SHA',from_name:'上海',to:'HAK',to_name:'海口',dates:[defDate()],alert_direct:0,alert_transfer:0,transfer_arrival_max:'02:00'});
+function addRoute(i){const _r={from:'SHA',from_name:'上海',to:'HAK',to_name:'海口',dates:[defDate()],alert_direct:0,alert_transfer:0,transfer_arrival_max:'02:00'};_r[ROUTE_ARRIVAL_AUTO]=true;CFG[i].routes.push(_r);
  FOLD.route[i+':'+(CFG[i].routes.length-1)]=false;/* 新航线自动展开 */
  buildForm();
  flashEl(document.querySelector('#cfgform .rline[data-rk="'+i+':'+(CFG[i].routes.length-1)+'"]'));}
@@ -16367,6 +16506,7 @@ function cfgCoreDirty(){
   ||JSON.stringify(_canon(GLB,JSON.parse(GLB_CLEAN)))!==JSON.stringify(_canon(JSON.parse(GLB_CLEAN),null));
 }
 function cfgAutoTick(){
+ if(typeof CFG_WIZ!=='undefined'&&CFG_WIZ.open)return;
  if(!CFG||!CFG_CLEAN||!GLB_CLEAN||CFG_SAVE_FLIGHT)return;
  let dirty=false;try{dirty=cfgCoreDirty();}catch(e){return;}
  if(!dirty){CFG_AUTO_CANDIDATE='';CFG_AUTO_TRIED='';return;}
@@ -16466,7 +16606,7 @@ async function saveCfgImpl(auto=false){
     const v=Number(r[k]);
     if(r[k]!==''&&r[k]!=null&&(isNaN(v)||v<0||v>99999)){
      cfgErr('❌ 阈值须为 0-99999 的数字');return;}}
-   if(!/^\d{2}:\d{2}$/.test(r.transfer_arrival_max||'02:00')){
+   if(r.transfer_arrival_max!=='不限'&&!/^\d{2}:\d{2}$/.test(r.transfer_arrival_max||'02:00')){
     cfgErr('❌ 到达时刻应为 HH:MM：'+r.transfer_arrival_max);return;}
    const mdh=Number(r.max_duration_h);
    if(r.max_duration_h!==''&&r.max_duration_h!=null
@@ -20947,7 +21087,7 @@ def _route_view(r) -> dict:
         "dates": d.get("dates") or [],
         "alert_direct": float(d.get("alert_direct", 0) or 0),
         "alert_transfer": float(d.get("alert_transfer", 0) or 0),
-        "transfer_arrival_max": d.get("transfer_arrival_max", "02:00"),
+        "transfer_arrival_max": _route_arrival_max(d),
         "transfer_layover_min": int(d.get("transfer_layover_min", 0) or 0),
         "transfer_baggage": d.get("transfer_baggage", "") or "",
         "dep_time_min": d.get("dep_time_min", "") or "",
@@ -22428,6 +22568,144 @@ def _srx_calendar(frm, to, date, days=14, axis="both"):
         _CAL_CACHE.update(key=key, at=time.time(), val=val)
         return val
 
+def _wizard_txn_journal(config_path):
+    return os.path.join(os.path.dirname(os.path.abspath(config_path)),
+                        ".ticket-monitoring-wizard-transaction.json")
+
+
+def _wizard_receipt_path(config_path, txid):
+    return os.path.join(os.path.dirname(os.path.abspath(config_path)),
+                        ".ticket-monitoring-wizard-receipt-%s.json" % txid)
+
+
+def _wizard_write_receipt(config_path, receipt):
+    import tempfile as _tempfile
+    txid = receipt.get("txid")
+    if not re.fullmatch(r"[0-9a-f]{32}", str(txid or "")):
+        return
+    path = _wizard_receipt_path(config_path, txid)
+    fd, staged = _tempfile.mkstemp(prefix=".wizard-receipt-",
+                                   suffix=".tmp", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(receipt, f, ensure_ascii=False, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(staged, path)
+    finally:
+        if os.path.exists(staged):
+            os.unlink(staged)
+
+
+def _wizard_txn_recover(config_path):
+    """Roll a pending route/watch save forward after a process interruption."""
+    journal = _wizard_txn_journal(config_path)
+    try:
+        with open(journal, encoding="utf-8") as f:
+            txn = json.load(f)
+    except FileNotFoundError:
+        return False
+    if not isinstance(txn, dict) or not isinstance(txn.get("files"), list):
+        raise RuntimeError("向导保存事务记录无效：%s" % journal)
+    for item in txn["files"]:
+        dest, staged = item.get("dest"), item.get("staged")
+        if not dest or not staged:
+            raise RuntimeError("向导保存事务记录缺少文件路径")
+        if os.path.exists(staged):
+            os.replace(staged, dest)
+        elif not os.path.exists(dest):
+            raise RuntimeError("向导保存事务缺少待发布文件：%s" % dest)
+    receipt = txn.get("receipt")
+    if isinstance(receipt, dict):
+        _wizard_write_receipt(config_path, receipt)
+    os.unlink(journal)
+    return True
+
+
+def _wizard_txn_recover_runtime(config_path):
+    """Recover under API locks, then refresh in-memory views in this process."""
+    journal = _wizard_txn_journal(config_path)
+    receipt = None
+    try:
+        with open(journal, encoding="utf-8") as f:
+            receipt = json.load(f).get("receipt")
+    except (FileNotFoundError, ValueError, AttributeError):
+        pass
+    if not _wizard_txn_recover(config_path):
+        return False
+    _WATCH_CACHE.clear()
+    try:
+        with _STATE_LOCK:
+            _STATE_CACHE["sig"] = None
+            _STATE_CACHE["payload"] = None
+            _STATE_CACHE["body"] = None
+            _STATE_CACHE["etag"] = None
+            _STATE_CACHE["gz"] = None
+    except NameError:
+        pass
+    warning = ""
+    try:
+        if _State.reload_cb:
+            _State.reload_cb()
+    except Exception as exc:
+        warning = str(exc)
+        if _State.logger:
+            _State.logger.exception("[向导恢复] 文件已恢复，但运行时热重载失败")
+    if isinstance(receipt, dict) and receipt.get("txid"):
+        receipt["reload_warning"] = warning
+        _wizard_write_receipt(config_path, receipt)
+    return True
+
+
+def _wizard_txn_commit(config_path, config_bytes, watch_path, watch_data,
+                       receipt=None):
+    """Publish config and flight-watch files as a recoverable single action."""
+    import tempfile as _tempfile
+    import stat as _stat
+    config_path = os.path.abspath(config_path)
+    watch_path = os.path.abspath(watch_path)
+    files = []
+    try:
+        for dest, content, binary in (
+                (config_path, config_bytes, True),
+                (watch_path, (json.dumps(watch_data, ensure_ascii=False,
+                    indent=2, sort_keys=True) + "\n").encode("utf-8"), True)):
+            parent = os.path.dirname(dest) or "."
+            os.makedirs(parent, exist_ok=True)
+            fd, staged = _tempfile.mkstemp(prefix=".wizard-", suffix=".tmp",
+                                           dir=parent)
+            with os.fdopen(fd, "wb") as f:
+                if os.path.exists(dest):
+                    os.fchmod(f.fileno(), _stat.S_IMODE(os.stat(dest).st_mode))
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            files.append({"dest": dest, "staged": staged})
+        journal = _wizard_txn_journal(config_path)
+        fd, staged_journal = _tempfile.mkstemp(prefix=".wizard-journal-",
+            suffix=".tmp", dir=os.path.dirname(journal))
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            journal_data = {"files": files}
+            if receipt:
+                journal_data["receipt"] = receipt
+            json.dump(journal_data, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(staged_journal, journal)
+        _wizard_txn_recover(config_path)
+    except Exception:
+        # Once the journal exists, leave staged files intact so the next API
+        # request can finish the transaction. Before then, clean unreferenced
+        # temporary files and leave both destinations untouched.
+        if not os.path.exists(_wizard_txn_journal(config_path)):
+            for item in files:
+                try:
+                    os.unlink(item["staged"])
+                except OSError:
+                    pass
+        raise
+
+
 def _watch_path():
     if _DEMO_WATCH_PATH:
         return _DEMO_WATCH_PATH
@@ -23425,7 +23703,7 @@ def _user_state(u):
     route = routes[0] if routes else {}
     th_d = float(route.get("alert_direct", 0) or 0)
     th_t = float(route.get("alert_transfer", 0) or 0)
-    am = route.get("transfer_arrival_max", "02:00") or "02:00"
+    am = _route_arrival_max(route)
     route_by_pair = {(r["from"], r["to"]): r for r in routes}
     # 同航线不同日期可有不同阈值/窗口（如乌→上 10/04 线 1600、10/05 线 1900）：
     # 按城市对索引会让后配置的日期覆盖前者——必须 (航线,日期) 精确匹配再回退航线
@@ -23468,7 +23746,7 @@ def _user_state(u):
         if transfer:
             qt = float(rq.get("alert_transfer", 0) or 0)
             return bool(qt and eff <= qt and Alerter._transfer_ok(f, {
-                "transfer_arrival_max": rq.get("transfer_arrival_max", "02:00") or "02:00",
+                "transfer_arrival_max": _route_arrival_max(rq),
                 "transfer_layover_min": float(rq.get("transfer_layover_min", 0) or 0),
                 "transfer_baggage": rq.get("transfer_baggage", "")}))
         qd = float(rq.get("alert_direct", 0) or 0)
@@ -23891,7 +24169,7 @@ def _user_state(u):
     # 中转到达约束按各自航线（原实现拿 routes[0] 的 am 一刀切——多航线混串）
     def _am_of(f):
         rr = _rr_of(f)
-        return rr.get("transfer_arrival_max", "02:00") or "02:00"
+        return _route_arrival_max(rr)
 
     # 行情口径（与走势曲线 _rounds 一致）：到达约束 + 衔接下限（行李不参与）
     def _lay_ok(f):
@@ -23947,7 +24225,7 @@ def _user_state(u):
                                  round(float(f["price"]))),
                 "stale": round(f["_stale_h"], 1) if f.get("_stale_h") else 0,
                 "route": label, "view": view, "th": th_v,
-                "tam": (rr.get("transfer_arrival_max", "02:00") or "02:00"),
+                "tam": _route_arrival_max(rr),
                 # 所属日期（delta 按日期精确匹配 routes_arr 用——单航线
                 # 多日期时 route 为空串，label 匹配会错配首日期序列）
                 "date": (f.get("depDate") or "")}
@@ -23990,7 +24268,7 @@ def _user_state(u):
     # 多航线走势：每 (航线,日期) 一条序列，前端图上切着看（必须画全部，不许只画第一条）
     routes_arr, seen_rd = [], set()
     for r in routes:
-        am_r = r.get("transfer_arrival_max", "02:00") or "02:00"
+        am_r = _route_arrival_max(r)
         for d0 in r.get("dates") or [""]:
             if (r["from"], r["to"], d0) in seen_rd:
                 continue
@@ -25183,12 +25461,51 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_error(405)
 
     def do_GET(self):
-        if self.path == '/api/config':
+        if (self.path == '/api/config'
+                or self.path.startswith('/api/config/wizard-result?')):
             with _CONFIG_FILE_LOCK:
-                return self._do_GET()
+                with _WATCH_LOCK:
+                    _wizard_txn_recover_runtime(_State.config_path)
+                    return self._do_GET()
+        if self.path.startswith('/api/srx/watch'):
+            # Lock order is config -> watch. Recover first so no watch read
+            # can observe an old file after a journaled config/watch commit.
+            with _CONFIG_FILE_LOCK:
+                with _WATCH_LOCK:
+                    _wizard_txn_recover_runtime(_State.config_path)
+                    return self._do_GET()
         return self._do_GET()
 
     def _do_GET(self):
+        # Browsers request this implicit UI resource even when the app has no
+        # branded icon. A quiet 204 avoids a spurious console 404 in self-tests.
+        if self.path == "/favicon.ico":
+            self.send_response(204)
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if self.path.startswith("/api/config/wizard-result?"):
+            if not self._access_guard():
+                return
+            from urllib.parse import urlparse as _up, parse_qs as _pq
+            _txid = (_pq(_up(self.path).query).get("txid") or [""])[0]
+            if not re.fullmatch(r"[0-9a-f]{32}", _txid):
+                self._json({"ok": False, "err": "事务编号无效"}, 400)
+                return
+            try:
+                with open(_wizard_receipt_path(_State.config_path, _txid),
+                          encoding="utf-8") as _rf:
+                    _receipt = json.load(_rf)
+                self._json({"ok": True, "saved": True,
+                            "revision": _receipt.get("revision", ""),
+                            "wizard_saved": bool(_receipt.get("watch_id")),
+                            "reload_warning": _receipt.get("reload_warning", "")})
+            except FileNotFoundError:
+                self._json({"ok": True, "saved": False})
+            except Exception as _receipt_error:
+                self._json({"ok": False, "err": str(_receipt_error)}, 500)
+            return
         # A fixed, data-free liveness probe only for the container itself.
         if self.path == '/healthz':
             import ipaddress
@@ -25815,6 +26132,7 @@ class _Handler(BaseHTTPRequestHandler):
                     # globals.port 随实际 --port（_State.cfg 由 demo_cfg 写入）
                     self._json(_demo_config_payload())
                     return
+                _wizard_txn_recover(_State.config_path)
                 import yaml as _y
                 with open(_State.config_path, "rb") as _yf:
                     _config_bytes = _yf.read()
@@ -25944,9 +26262,11 @@ class _Handler(BaseHTTPRequestHandler):
         import io as _io
         self.rfile = _io.BytesIO(_raw)
         try:
-            if self.path == "/api/config":
+            if self.path in ("/api/config", "/api/srx/watch"):
                 with _CONFIG_FILE_LOCK:
-                    self._do_POST()
+                    with _WATCH_LOCK:
+                        _wizard_txn_recover_runtime(_State.config_path)
+                        self._do_POST()
             else:
                 self._do_POST()
         finally:
@@ -25962,6 +26282,7 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(length).decode("utf-8"))
+                _wizard_txn_recover_runtime(st.config_path)
                 import yaml as _y
                 with open(st.config_path, "rb") as _yf:
                     _config_bytes = _yf.read()
@@ -25972,6 +26293,40 @@ class _Handler(BaseHTTPRequestHandler):
                     return
                 cfg = _y.safe_load(_config_bytes) or {}
                 cfg["users"] = body.get("users") or []
+                _wizard_watch_entry = None
+                _wizard_user = str(body.get("wizard_user") or "").strip()
+                _wizard_txid = str(body.get("wizard_txid") or "")
+                if _wizard_txid and not re.fullmatch(r"[0-9a-f]{32}",
+                                                       _wizard_txid):
+                    raise ValueError("向导事务编号无效")
+                if body.get("wizard_watch") is not None:
+                    _wizard_payload = body.get("wizard_watch")
+                    if not isinstance(_wizard_payload, dict) or not _wizard_user:
+                        raise ValueError("向导关注信息无效")
+                    _wizard_user_cfg = next((u for u in cfg["users"]
+                                             if str(u.get("name") or "").strip()
+                                             == _wizard_user), None)
+                    if not _wizard_user_cfg:
+                        raise ValueError("找不到向导所选用户")
+                    _wf = str(_wizard_payload.get("from") or "").upper()
+                    _wt = str(_wizard_payload.get("to") or "").upper()
+                    _wd = str(_wizard_payload.get("date") or "")
+                    _parent = next((r for r in (_wizard_user_cfg.get("routes")
+                                                or [])
+                                    if str(r.get("from") or "").upper() == _wf
+                                    and str(r.get("to") or "").upper() == _wt
+                                    and _wd in (r.get("dates") or [])), None)
+                    if _parent is None:
+                        raise ValueError("向导关注航班必须对应本次新增的航线和日期")
+                    _wizard_watch_entry = _watch_entry(_wizard_payload)
+                    _wizard_watch_entry["_wizard_user"] = _wizard_user
+                    with _WATCH_LOCK:
+                        _existing_watch = _watch_read().get(_wizard_user, [])
+                    if any(x.get("id") == _wizard_watch_entry["id"]
+                           for x in _existing_watch):
+                        raise ValueError("该航班已在关注清单")
+                    if len(_existing_watch) >= 100:
+                        raise ValueError("关注航班最多 100 条")
                 glb = body.get("globals") or {}
                 if glb.get("interval_minutes"):
                     cfg.setdefault("schedule", {})["interval_minutes"] = \
@@ -26084,29 +26439,66 @@ class _Handler(BaseHTTPRequestHandler):
                     n0 = u0.get("notifier") or {}
                     n0["win_toast"] = bool(n0.get("win_toast", True))
                     u0["notifier"] = n0
-                # Write next to the configuration and publish with one rename.
-                # A single-file Docker bind mount cannot be replaced: mount the
-                # parent directory instead; an error leaves the original intact.
+                # The wizard's route and optional watched flight live in two
+                # files. A journal makes the pair recoverable after process death.
                 import tempfile as _tempfile
                 import stat as _stat
-                _config_dir = os.path.dirname(os.path.abspath(st.config_path))
-                _temp_path = None
-                try:
-                    with _tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
-                            dir=_config_dir, prefix=".config-", suffix=".tmp", delete=False) as f:
-                        _temp_path = f.name
-                        os.chmod(_temp_path, _stat.S_IMODE(os.stat(st.config_path).st_mode))
-                        _y.safe_dump(cfg, f, allow_unicode=True, sort_keys=False, width=100)
-                        f.flush()
-                        os.fsync(f.fileno())
-                    with open(_temp_path, "rb") as f:
-                        _new_revision = hashlib.sha256(f.read()).hexdigest()
-                    os.replace(_temp_path, st.config_path)
+                if _wizard_watch_entry or _wizard_txid:
+                    with _WATCH_LOCK:
+                        _watch_data = _watch_read()
+                        if _wizard_watch_entry:
+                            _wizard_watch_entry.pop("_wizard_user", None)
+                            _watch_items = _watch_data.get(_wizard_user, [])
+                            if any(x.get("id") == _wizard_watch_entry["id"]
+                                   for x in _watch_items):
+                                raise ValueError("该航班刚被另一页面添加，请刷新后重试")
+                            _watch_data[_wizard_user] = [_wizard_watch_entry] + _watch_items
+                        _new_config_bytes = _y.safe_dump(
+                            cfg, allow_unicode=True, sort_keys=False,
+                            width=100).encode("utf-8")
+                        _receipt = ({"txid": _wizard_txid,
+                                     "revision": hashlib.sha256(
+                                         _new_config_bytes).hexdigest(),
+                                     "watch_id": (_wizard_watch_entry or {}).get("id", "")}
+                                    if _wizard_txid else None)
+                        _wizard_txn_commit(st.config_path, _new_config_bytes,
+                                           _watch_path(), _watch_data,
+                                           receipt=_receipt)
+                        _WATCH_CACHE.clear()
+                    _new_revision = hashlib.sha256(_new_config_bytes).hexdigest()
+                else:
+                    # A single-file Docker bind mount cannot be replaced: mount
+                    # the parent directory instead; failure leaves the original.
+                    _config_dir = os.path.dirname(os.path.abspath(st.config_path))
                     _temp_path = None
-                finally:
-                    if _temp_path and os.path.exists(_temp_path):
-                        os.unlink(_temp_path)
-                n = st.reload_cb() if st.reload_cb else 0
+                    try:
+                        with _tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                dir=_config_dir, prefix=".config-", suffix=".tmp", delete=False) as f:
+                            _temp_path = f.name
+                            os.chmod(_temp_path, _stat.S_IMODE(os.stat(st.config_path).st_mode))
+                            _y.safe_dump(cfg, f, allow_unicode=True, sort_keys=False, width=100)
+                            f.flush()
+                            os.fsync(f.fileno())
+                        with open(_temp_path, "rb") as f:
+                            _new_revision = hashlib.sha256(f.read()).hexdigest()
+                        os.replace(_temp_path, st.config_path)
+                        _temp_path = None
+                    finally:
+                        if _temp_path and os.path.exists(_temp_path):
+                            os.unlink(_temp_path)
+                try:
+                    n = st.reload_cb() if st.reload_cb else 0
+                    _reload_warning = ""
+                except Exception as _reload_error:
+                    # The durable files are already committed. Report success
+                    # and the runtime reload issue separately to avoid a false
+                    # save failure and duplicate user retries.
+                    n = 0
+                    _reload_warning = str(_reload_error)
+                    st.logger.exception("[web配置] 已保存，但运行时热重载失败")
+                if _wizard_txid:
+                    _receipt["reload_warning"] = _reload_warning
+                    _wizard_write_receipt(st.config_path, _receipt)
                 # 签名缓存作废：签名五元组只含运行时 users 形态，cfg 派生
                 # 键（suspended 等）在「只改停用航线配置」场景下 users 序列
                 # 化逐字节不变，不作废则卡片文本陈旧到进程重启
@@ -26116,7 +26508,9 @@ class _Handler(BaseHTTPRequestHandler):
                 # 拉一次配置即可点亮「需重启」与迁移预案
                 self._json({"ok": True, "users": n, "revision": _new_revision,
                             "storage": _storage_view(cfg),
-                            "restart": _restart_view(cfg)})
+                            "restart": _restart_view(cfg),
+                            "wizard_saved": bool(_wizard_watch_entry),
+                            "reload_warning": _reload_warning})
             except Exception as e:
                 self._json({"ok": False, "err": str(e)}, 500)
         elif self.path == "/api/open-folder":

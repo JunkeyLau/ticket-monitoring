@@ -3328,7 +3328,8 @@ class Alerter:
                         lbl = f"{icon}最优 · {short} {dshort}"
                         # 中转组头必须带到达时限（判据不得仅限 label_override
                         # 为空时渲染——那样 multi 总表不可见）；超宽省略小字
-                        if kind == "transfer" and route.transfer_arrival_max:
+                        if kind == "transfer" and route.transfer_arrival_max \
+                                and route.transfer_arrival_max != "不限":
                             _tag = f" · 次日{route.transfer_arrival_max}前到"
                             if _dw(lbl + _tag) <= 60:
                                 lbl += _tag
@@ -3958,7 +3959,10 @@ class Alerter:
             # （曾产三连空行）
             desp += f"#### 🔁 中转最优TOP5{d_tag}\n\n"
             if route.alert_transfer > 0:
-                desp += (f"> 仅当日/次日{route.transfer_arrival_max}前到 ｜ "
+                _am = route.transfer_arrival_max
+                _arrival_desc = ("中转到达不限时刻" if _am == "不限"
+                                 else f"仅当日/次日{_am}前到")
+                desp += (f"> {_arrival_desc} ｜ "
                          f"线￥{route.alert_transfer:.0f}\n\n")
             if s.get("top_transfer"):
                 for i, fl in enumerate(s["top_transfer"], 1):
@@ -4600,6 +4604,15 @@ class Alerter:
         cross_days 国际档上限（7）与衔接时长约束兜底；当日达无条件过
         与国内同语义。国内路径逐字节不变。"""
         dep, arr, t = f.get("depDate", ""), f.get("arrDate", ""), f.get("arrTime", "")
+        # "不限" is an explicit international-only deadline sentinel. Keep
+        # the domestic branch below byte-for-byte unchanged; routes missing
+        # the field still receive the legacy 02:00 default at their callers.
+        if deadline == "不限":
+            if f.get("intl"):
+                return True
+            # Old/manual domestic YAML could contain the international-only
+            # sentinel. Normalize every dict/Route consumer consistently.
+            deadline = "02:00"
         if dep and arr:
             try:
                 d0 = datetime.strptime(dep, "%Y-%m-%d")

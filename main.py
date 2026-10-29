@@ -26,7 +26,7 @@ import yaml
 
 from core.logger import setup_logger
 from core.models import Route, price_band_ok
-from core.intl import is_intl_route
+from core.intl import is_intl_route, normalize_transfer_arrival_max
 from core.storage import PriceStorage
 from core.alerter import Alerter, sanitize_desp
 from core.scheduler import run_scheduler
@@ -101,7 +101,11 @@ def build_routes(routes_cfg: list) -> list:
             alert_threshold=float(r.get("alert_threshold", 0) or 0),
             alert_direct=float(r.get("alert_direct", 0) or 0),
             alert_transfer=_tr,
-            transfer_arrival_max=str(r.get("transfer_arrival_max", "02:00")),
+            # "不限" was introduced for international routes. Normalize a
+            # legacy/manual domestic sentinel to the historic cutoff so the
+            # runtime agrees with the domestic editor's 02:00 value.
+            transfer_arrival_max=normalize_transfer_arrival_max(
+                r["from"], r["to"], r.get("transfer_arrival_max", "02:00")),
             # 中转衔接下限与行李直挂必须传入 Route——漏传曾使主链路
             # （达标推送/总表/概览）的这两项配置整体失效（默认 0/""），
             # 而日报 dict 路径却生效，同一配置两条口径「时好时坏」
@@ -2121,6 +2125,16 @@ def main():
         pass
 
     cfg_path = Path(args.config)
+
+    # Complete any interrupted add-watch transaction before loading config;
+    # web/API recovery alone is too late if the process starts with half of
+    # the journaled config/watch pair already visible. Avoid importing the
+    # console on ordinary CLI starts when there is no journal to recover.
+    _wizard_journal = cfg_path.resolve().parent / \
+        ".ticket-monitoring-wizard-transaction.json"
+    if _wizard_journal.is_file():
+        from webui import _wizard_txn_recover
+        _wizard_txn_recover(str(cfg_path))
 
     if args.setup:
         from wizard import run_wizard

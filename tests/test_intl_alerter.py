@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.alerter import (Alerter, _flights_from_extra,  # noqa: E402
                           _qual_price, FLIGGY_TAX_PAD)
+from main import build_routes  # noqa: E402
 
 
 def _intl_row(**over):
@@ -95,3 +96,54 @@ def test_stale_sane_tz_corrected_intl_row():
     f3 = {"depTime": "02:20", "arrTime": "08:20",
           "totalDuration": "3小时", "tz_dep": 480, "tz_arr": 540}
     assert Alerter._stale_sane(f3) is False
+
+
+def test_unlimited_arrival_deadline_allows_late_intl_transfer():
+    """International transfers with no deadline pass even after local 02:00."""
+    flight = _intl_row(arrDate="2026-10-18", arrTime="13:30",
+                       transCity="Dubai", layoverM=180)
+    assert Alerter._arrival_ok(flight, "不限") is True
+    assert Alerter._transfer_ok(flight, {"transfer_arrival_max": "不限"}) is True
+    arrival_unknown = dict(flight, arrTime="")
+    assert Alerter._arrival_ok(arrival_unknown, "不限") is True
+
+
+def test_legacy_missing_arrival_deadline_and_domestic_filter_stay_0200():
+    """Old/missing deadline remains 02:00 and domestic logic stays unchanged."""
+    late_intl = _intl_row(arrDate="2026-10-18", arrTime="13:30",
+                          transCity="Dubai")
+    assert Alerter._transfer_ok(late_intl, {}) is False
+
+    domestic_late = {"depDate": "2026-10-17", "arrDate": "2026-10-18",
+                     "arrTime": "13:30", "crossDayDesc": "+1天"}
+    domestic_early = dict(domestic_late, arrTime="01:30")
+    assert Alerter._arrival_ok(domestic_late, "02:00") is False
+    assert Alerter._arrival_ok(domestic_early, "02:00") is True
+
+
+def test_route_config_keeps_legacy_deadline_and_roundtrips_unlimited():
+    old = build_routes([{"from": "SHA", "to": "LHR", "dates": ["2026-12-17"]}])[0]
+    new = build_routes([{"from": "SHA", "to": "LHR", "dates": ["2026-12-17"],
+                         "transfer_arrival_max": "不限"}])[0]
+    assert old.transfer_arrival_max == "02:00"
+    assert new.transfer_arrival_max == "不限"
+
+
+def test_legacy_unlimited_deadline_is_normalized_for_domestic_route():
+    domestic = build_routes([{"from": "SHA", "to": "PEK",
+                              "dates": ["2026-12-17"],
+                              "transfer_arrival_max": "不限"}])[0]
+    international = build_routes([{"from": "SHA", "to": "LHR",
+                                   "dates": ["2026-12-17"],
+                                   "transfer_arrival_max": "不限"}])[0]
+    assert domestic.transfer_arrival_max == "02:00"
+    assert international.transfer_arrival_max == "不限"
+    domestic_late = {"depDate": "2026-12-17", "arrDate": "2026-12-18",
+                     "arrTime": "13:30", "crossDayDesc": "+1天"}
+    assert Alerter._arrival_ok(domestic_late, "不限") is False
+    from report import _route_arrival_max as report_arrival_max
+    from webui import _route_arrival_max as webui_arrival_max
+    legacy_domestic = {"from": "SHA", "to": "PEK",
+                       "transfer_arrival_max": "不限"}
+    assert report_arrival_max(legacy_domestic) == "02:00"
+    assert webui_arrival_max(legacy_domestic) == "02:00"

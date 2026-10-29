@@ -477,6 +477,14 @@ def is_intl_route(from_code, to_code) -> bool:
     return is_intl_city(from_code) or is_intl_city(to_code)
 
 
+def normalize_transfer_arrival_max(from_code, to_code, deadline) -> str:
+    """Treat the international-only ``不限`` sentinel as legacy 02:00 on domestic routes."""
+    value = str(deadline or "02:00")
+    if value == "不限" and not is_intl_route(from_code, to_code):
+        return "02:00"
+    return value
+
+
 def city_name_of(code) -> str:
     """码 → 展示名：国际字典 → 国内 CODE_NAME 反查 → 原样码。"""
     c = str(code or "").strip().upper()

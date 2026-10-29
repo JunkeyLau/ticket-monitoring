@@ -31,6 +31,7 @@ from core.alerter import (Alerter, _TBL_HEAD_TIER, _cabin_cn, _qual_price, FLIGG
                           _pct_fallback_forms, _kpi_pct_suffix,
                           _ops_fallbacks, _clip_dw)
 from core.models import price_band_ok, render_dir
+from core.intl import normalize_transfer_arrival_max
 from core.flightnorm import (normalize, discount_txt, prate_txt, cabin_clean,
                              dep_mismatch)
 
@@ -57,6 +58,12 @@ def _pad_hhmm(t) -> str:
     """渠道时刻补零（"9:30"→"09:30"），供窗口判定用；解析失败原样。"""
     m = re.match(r"^(\d{1,2}):(\d{2})", str(t or "").strip())
     return f"{int(m.group(1)):02d}:{m.group(2)}" if m else str(t or "").strip()
+
+
+def _route_arrival_max(route):
+    return normalize_transfer_arrival_max(
+        route.get("from"), route.get("to"),
+        route.get("transfer_arrival_max", "02:00"))
 
 # ---- 画图 ----
 # 色板与 webui PAGE :root 同值（跨端同一色系：推送图与控制台同源质感）
@@ -1303,10 +1310,12 @@ def render_flights_table(rows, title, out_path="data/flights_table.png",
             # 组头到达约束动态化：meta 带 arrival_max（配置的
             # transfer_arrival_max）则拼实际时刻，缺省保持「凌晨前」兜底
             # （旧版硬编码，与配置不一致时两张皮）
-            label = label_override or (
-                f"中转行情最优（仅当日/次日 {meta.get('arrival_max')} 前到达）"
-                if meta.get("arrival_max")
-                else "中转行情最优（仅当日/次日凌晨前到达）")
+            _arrival_max = meta.get("arrival_max")
+            _arrival_desc = ("不限到达时刻" if _arrival_max == "不限"
+                             else (f"仅当日/次日 {_arrival_max} 前到达"
+                                   if _arrival_max
+                                   else "仅当日/次日凌晨前到达"))
+            label = label_override or f"中转行情最优（{_arrival_desc}）"
         label = _no_emoji(label)
         color = C_DIRECT if kind == "direct" else C_TRANSFER
         tx_c = color if kind == "direct" else C_TRANSFER_TX   # 文字面 AA（P2-1）
@@ -2264,12 +2273,15 @@ def _transfer_empty_note(lay_min, arrival_max):
     会对着词面找不存在的约束）；到达约束恒生效（_rounds 链 02:00 兜
     底），缺省形态保持「次日 02:00」兜底词面；双约束皆缺省归因渠道
     未回数。"""
-    if lay_min <= 0 and not arrival_max:
+    if lay_min <= 0 and arrival_max in (None, "", "不限"):
         return "暂无数据（该轮渠道未回中转班次，下轮自动补上）"
     parts = []
     if lay_min > 0:
         parts.append("衔接≥%d 分钟" % lay_min)
-    parts.append("%s 前到达" % (arrival_max or "次日 02:00"))
+    if arrival_max != "不限":
+        parts.append("%s 前到达" % (arrival_max or "次日 02:00"))
+    if not parts:
+        return "暂无数据（该轮渠道未回中转班次，下轮自动补上）"
     return "暂无满足约束的班次（%s）" % "·".join(parts)
 
 
@@ -2343,7 +2355,7 @@ def prepare_round_charts(cfg, logger, route_override=None, user=""):
                 dmax = (r.get("dep_time_max") or "").strip()
                 series = _rounds(
                     db_path, r["from"], r["to"], date,
-                    r.get("transfer_arrival_max", "02:00"),
+                    _route_arrival_max(r),
                     layover_min=int(r.get("transfer_layover_min", 0) or 0),
                     dep_win=(dmin, dmax) if (dmin or dmax) else None,
                     rc=r,
@@ -2725,7 +2737,7 @@ def _split_market_pool(fs, rc):
     # price) 抛 TypeError、￥{:.0f} 抛 ValueError，整张日报明细表图被
     # 外层 try 跳过只剩「生成失败」文本（查现价池第五消费端已守，此处漏）
     fs = [f for f in fs if price_band_ok(f.get("price"), el=f)]
-    am = rc.get("transfer_arrival_max", "02:00") or "02:00"
+    am = _route_arrival_max(rc)
     lay_min = int(rc.get("transfer_layover_min", 0) or 0)
     at_ = float(rc.get("alert_transfer", 0) or 0)
     ad = float(rc.get("alert_direct", 0) or 0)
@@ -2846,7 +2858,7 @@ def build_and_push(cfg, logger, notifier, user=""):
     for r in routes_cfg:
         if r.get("enabled") is False:
             continue
-        am = r.get("transfer_arrival_max", "02:00") or "02:00"
+        am = _route_arrival_max(r)
         _dmin = (r.get("dep_time_min") or "").strip()
         _dmax = (r.get("dep_time_max") or "").strip()
         _dw = (_dmin, _dmax) if (_dmin or _dmax) else None
@@ -2937,7 +2949,7 @@ def build_and_push(cfg, logger, notifier, user=""):
             （_rounds 本地库，量级可忽略）。"""
             try:
                 _h7 = _rounds(db_path, fc, tc, date,
-                              rc.get("transfer_arrival_max", "02:00") or "02:00",
+                              _route_arrival_max(rc),
                               hours=168,
                               layover_min=int(rc.get("transfer_layover_min", 0) or 0),
                               dep_win=dep_win, rc=rc,
@@ -3093,7 +3105,7 @@ def build_and_push(cfg, logger, notifier, user=""):
         try:
             sec.append(_trend_block(_trend_line_str(
                 db_path, fc, tc, date,
-                rc.get("transfer_arrival_max", "02:00") or "02:00",
+                _route_arrival_max(rc),
                 int(rc.get("transfer_layover_min", 0) or 0), dep_win)))
         except Exception:
             sec.append(_TREND_MISSING_NOTE)
@@ -3109,8 +3121,7 @@ def build_and_push(cfg, logger, notifier, user=""):
             _pmins = _plat_mins(directs + mkt_t)
             _pbest = _plat_best_rows(directs + mkt_t)
             _meta = {"layover_min": int(rc.get("transfer_layover_min", 0) or 0),
-                     "arrival_max": rc.get("transfer_arrival_max",
-                                           "02:00") or "02:00",
+                     "arrival_max": _route_arrival_max(rc),
                      "plat_mins": _pmins}
             # 日报补同班比价组：实时总表已有 compare，日报
             # 缺席=比价离群警示在日报不可见。与实时同源：同一指纹分组
@@ -3173,8 +3184,7 @@ def build_and_push(cfg, logger, notifier, user=""):
                                + _daily_top_fallback(
                                    directs, mkt_t,
                                    int(rc.get("transfer_layover_min", 0) or 0),
-                                   rc.get("transfer_arrival_max",
-                                          "02:00") or "02:00")
+                                   _route_arrival_max(rc))
                                + _daily_compare_fallback(directs, mkt_t, date, logger)
                                + _daily_market_fallback(_pmins, _pbest)
                                + _daily_ops_fallback(_ops_notes_fb))
@@ -3186,8 +3196,7 @@ def build_and_push(cfg, logger, notifier, user=""):
                            + _daily_top_fallback(
                                directs, mkt_t,
                                int(rc.get("transfer_layover_min", 0) or 0),
-                               rc.get("transfer_arrival_max",
-                                      "02:00") or "02:00")
+                               _route_arrival_max(rc))
                            + _daily_compare_fallback(directs, mkt_t, date, logger)
                            + _daily_market_fallback(_pmins, _pbest)
                            + _daily_ops_fallback(_ops_notes_fb))

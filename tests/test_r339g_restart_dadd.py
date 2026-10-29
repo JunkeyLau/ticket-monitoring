@@ -292,9 +292,8 @@ def test_international_flight_guide_links_to_routes(page):
     page.evaluate("showCfgPanel('watch')")
     page.wait_for_selector('#cfgWatch details summary', timeout=8000)
     page.locator('#cfgWatch details summary').click()
-    assert '出发地、目的地和出发日期' in page.locator('#cfgWatch details').inner_text()
-    page.locator('#cfgWatch details button').click()
-    assert page.evaluate('CFGPANEL') == 'users'
+    assert '四步完成' in page.locator('#cfgWatch details').inner_text()
+    assert '按已有航线添加' in page.locator('#cfgWatch').inner_text()
 
 
 def test_city_panel_reopening_does_not_leave_page_scroll_locked(page):

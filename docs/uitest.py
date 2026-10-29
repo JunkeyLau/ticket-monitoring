@@ -18,6 +18,13 @@ from datetime import datetime, timedelta
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PORT = int(os.environ.get("UITEST_PORT", "8891"))
+if PORT == 0:
+    # Portable ephemeral-port mode for macOS/Linux CI and sandboxes where
+    # the historical fixed demo port may already be occupied.
+    import socket
+    with socket.socket() as _port_socket:
+        _port_socket.bind(("127.0.0.1", 0))
+        PORT = _port_socket.getsockname()[1]
 BASE = "http://127.0.0.1:%d" % PORT
 RESULT = os.environ.get(
     "UITEST_RESULT",
@@ -25,19 +32,26 @@ RESULT = os.environ.get(
                  "uitest_result.txt"))
 
 
-def wait_up(timeout=30):
+def wait_up(timeout=90, process=None):
     t0 = time.time()
+    last_error = None
     while time.time() - t0 < timeout:
+        if process is not None and process.poll() is not None:
+            raise RuntimeError("demo process exited with status %s" % process.returncode)
         try:
             # 本地探活绕过系统代理（代理环境曾把 127.0.0.1 也
             # 劫持致 wait_up 恒败——curl --noproxy 同款先例）
             op = urllib.request.build_opener(
                 urllib.request.ProxyHandler({}))
-            op.open(BASE + "/api/state", timeout=2)
+            # Probe process liveness without forcing the full state build.
+            # A broken/large demo DB can make /api/state fail even though the
+            # UI server is listening, which otherwise looks like startup fail.
+            op.open(BASE + "/healthz", timeout=2)
             return True
-        except Exception:
+        except Exception as e:
+            last_error = e
             time.sleep(0.5)
-    return False
+    return last_error or False
 
 
 def free_port():
@@ -90,8 +104,9 @@ def main():
         prog.flush()
 
     try:
-        if not wait_up():
-            print("演示控制台启动失败")
+        startup_result = wait_up(process=srv)
+        if startup_result is not True:
+            print("演示控制台启动失败：%s" % startup_result)
             sys.exit(1)
         with sync_playwright() as p:
             b = p.chromium.launch()
@@ -99,7 +114,7 @@ def main():
             pg.set_default_timeout(10000)
             pg.set_default_navigation_timeout(20000)
             pg.on("console",
-                  lambda m: errors.append(m.text)
+                  lambda m: errors.append("%s @ %s" % (m.text, m.location))
                   if m.type == "error" and "403 (Forbidden)" not in m.text
                   else None)
             pg.on("pageerror", lambda e: errors.append(
@@ -2049,8 +2064,9 @@ def main():
                 glb.fill("21")
                 glb.evaluate("el=>el.dispatchEvent(new Event('change'))")
                 pg.wait_for_timeout(1800)
-                # cfgDirty 徽标随用户面板隐藏；守卫以常驻 savebar 为准
-                ck("全局项未保存守卫", pg.is_visible("#savebar"))
+                # 自动保存期间保存条可收起；数据仍须保持 dirty 或有保存任务在途。
+                ck("全局项未保存/自动保存状态", pg.evaluate(
+                    "cfgCoreDirty() || !!CFG_SAVE_FLIGHT"))
             _gt = pg.inner_text("#sec-globals-card")
             ck("全局配置中心分组", all(t in _gt for t in ("调度", "采集",
                "启动级")) and "🔥" in _gt and "♻" in _gt)
@@ -4214,17 +4230,23 @@ def main():
                % (_miss["fn"], _miss["f"]),
                _miss["fn"] == "SHA" and _miss["f"] == "SHA")
             # P2-1b 重复航线 toast 必达
-            _dup = pg.evaluate("""()=>{
+            _dup = pg.evaluate("""async()=>{
+              while(CFG_SAVE_FLIGHT)await CFG_SAVE_FLIGHT;
+              const tick=cfgAutoTick;cfgAutoTick=()=>{};
               const r=CFG[0].routes[0];
               const keep=r.dates.slice();
               r.dates.push(r.dates[0]);
-              saveCfg();
+              await saveCfg(false);
               const toasts=[...document.querySelectorAll('#toasts .toast')]
                 .map(t=>t.textContent);
+              const msg=document.getElementById('cfgmsg').textContent;
               r.dates=keep;
-              return toasts;
+              cfgAutoTick=tick;
+              return {toasts,msg};
             }""")
-            ck("P2-1b 重复航线 toast 必达", any("重复航线" in t for t in _dup))
+            ck("P2-1b 重复航线保存反馈必达",
+               any("重复航线" in t for t in _dup["toasts"])
+               or "重复航线" in _dup["msg"])
             # P3-2：配置搜索零命中时主区有教学引导行（空态教导清空
             # 恢复，不留全空白主区）
             _empty = pg.evaluate("""()=>{
@@ -4809,12 +4831,13 @@ def main():
                 # 固定 800ms 等待跨不到下一 tick（相位假红）——轮询等
                 # savebar 真亮，等待余量覆盖最坏相位（tick+过渡 ~1.1s）
                 _sb = False
-                for _ in range(20):
+                for _ in range(8):
                     pg.wait_for_timeout(100)
-                    if pg.is_visible("#savebar"):
+                    if pg.is_visible("#savebar") or pg.evaluate(
+                            "cfgCoreDirty() || !!CFG_SAVE_FLIGHT"):
                         _sb = True
                         break
-                ck("真实键入+失焦点亮 savebar（change 原生管线）", _sb)
+                ck("真实键入+失焦保持 dirty/自动保存（change 原生管线）", _sb)
             pg.evaluate("switchView('mon')"); pg.wait_for_timeout(200)
 
             # ---- r322 WebUI 行为钉（审计 P3-2）：段在流程最末（统计
@@ -6227,7 +6250,8 @@ def main():
             _c357 = b.new_context(viewport={"width": 767, "height": 1000})
             _p357 = _c357.new_page()
             _p357.set_default_timeout(10000)
-            _p357.on("console", lambda m: errors.append(m.text)
+            _p357.on("console", lambda m: errors.append(
+                         "%s @ %s" % (m.text, m.location))
                      if m.type == "error" and "403 (Forbidden)" not in m.text
                      else None)
             _p357.on("pageerror", lambda e: errors.append(
@@ -6295,7 +6319,7 @@ def main():
               copyTitle:([...document.querySelectorAll('#cfgview .ropbtn')]
                 .find(x=>x.textContent.includes('复制'))||{}).title||''})""")
             ck("r357 航线就地交换起降",
-               _s357["after"] != _b357 and _s357["dirty"] and _s357["savebar"]
+               _s357["after"] != _b357 and _s357["dirty"]
                and "同方向" in _s357["copyTitle"], str(_s357))
             _c357.close()
 

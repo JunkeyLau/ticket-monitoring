@@ -38,7 +38,7 @@ class Route:
     alert_threshold: float = 0
     alert_direct: float = 0        # 直飞阈值（0 不启用）
     alert_transfer: float = 0      # 中转阈值（0 不启用，须满足到达时间约束）
-    transfer_arrival_max: str = "02:00"  # 中转最晚到达（次日该时刻前）
+    transfer_arrival_max: str = "02:00"  # 中转最晚到达；"不限"=不按到达时刻筛选
     transfer_layover_min: int = 0  # 中转最短衔接分钟（0=不限；需托运建议 ≥90）
     transfer_baggage: str = ""     # "direct"=仅认渠道标明行李直挂的班次（""=不限）
     dep_time_min: str = ""         # 出发时段下限 HH:MM（空=不限）
