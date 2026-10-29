@@ -2,8 +2,8 @@
 """本轮 WebUI 层源码钉（EN 增强五案 + riskPolicy 消费端）：
 
 1. 脉冲卡入概览 tab（首屏 chrome 税收口）：pulsecard DOM 移入
-   #montab-overview，details/trend/health 首屏省 ~252px；红帽徽标
-   （ovAlert+renderPulseAlert）保证渠道异常在其他 tab 仍全局可见。
+   #montab-overview，details/trend/health 首屏省 ~252px；渠道灯
+   （channelLamp+renderPulseAlert）保证渠道异常在其他 tab 仍全局可见。
 2. 桌面视图切换器吸顶：761+ 档 #montabs sticky 贴 header 底，
    追加块置尾（与 ≤540/≤390 同选择器块命中域不相交）；锚点补偿
    scroll-padding 同块联动。
@@ -38,20 +38,20 @@ def test_pulsecard_inside_overview_tab():
     assert src.index('id="pulsecard"') < src.index("</div><!-- /montab-overview -->")
 
 
-def test_pulse_alert_badge_wiring():
-    """红帽徽标三件套：概览 tab 红点、渲染函数、renderPulse 尾部接线。"""
+def test_pulse_alert_updates_global_channel_lamp():
+    """全局渠道灯由采集错误源更新，并在 pulse 渲染尾部接线。"""
     src = _src()
-    assert 'id="ovAlert"' in src
+    assert 'id="channelLamp"' in src
     assert "function renderPulseAlert(fails)" in src
     assert "renderPulseAlert(last.fails||0);" in src
+    assert "function renderChannelLamp()" in src
 
 
-def test_pulse_alert_badge_a11y():
-    """徽标读屏语义（WebUI 审计 EN-9）：role=img + aria-label 静态
-    在位——display:none 天然从可访问性树移除，点亮即暴露。"""
+def test_channel_lamp_a11y():
+    """渠道灯作为按钮带可更新的渠道状态读屏名。"""
     src = _src()
-    # r281 红帽双源合成后语义扩为「采集或推送通道有异常」
-    assert 'id="ovAlert" role="img" aria-label="采集或推送通道有异常' in src
+    assert 'id="channelLamp" type="button" aria-label="渠道状态：正在读取"' in src
+    assert "el.setAttribute('aria-label','渠道状态：'+label" in src
 
 
 def test_desktop_montabs_sticky_tail_block():
@@ -89,8 +89,8 @@ def test_glb_ranges_single_source_table():
     assert "const GLB_RANGES=[" in src
     assert "function glbCheck(el,returnMsg)" in src
     assert 'oninput="glbCheck(this)"' in src
-    savecfg = src[src.index("async function saveCfg()"):]
-    assert "for(const r of GLB_RANGES)" in savecfg[:600]
+    savecfg = src[src.index("async function saveCfgImpl(auto=false)"):]
+    assert "for(const r of GLB_RANGES)" in savecfg[:1500]
     assert ".glcell input.invalid" in src
     assert ".glcell .verr" in src
 
@@ -134,11 +134,10 @@ def test_details_tabs_scroll_hint():
     # renderHealth/resize debounce/switchView，同判定
     # scrollWidth>clientWidth+4）选择器扩展覆盖明细条
     assert src.count(".hcells,#montab-details .tabs") >= 4
-    # 第 5 处循环：showMonTab details 分支独立明细条判定（首渲在
-    # 隐藏容器 sw=0，切回补一拍）——组合计数钉罩不住它，独立钉。
-    # r253 起 .tw（表内横滚提示）并入同批
-    assert ("if(t==='details')document.querySelectorAll("
-            "'#montab-details .tabs,.tw')") in src
+    # 阶段 2 将走势/明细并入关注详情；旧深链仍转为 watch，且显式
+    # details 别名保留表格落地。不存在独立的 montab-details 筛选条。
+    assert "if(t==='trend'||t==='details')t='watch';" in src
+    assert "legacyFollowTab==='details'" in src
 
 
 def test_footer_link_hover():

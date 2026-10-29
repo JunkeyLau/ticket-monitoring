@@ -167,14 +167,14 @@ def test_tabpanels_have_accessible_names(srv):
     pw, page = srv
     got = page.evaluate("""() => {
       tabAria();
-      const names={overview:'概览',trend:'走势',details:'航班明细',
+      const names={overview:'今日',trend:'走势',details:'航班明细',
                    health:'渠道健康'};
       const out={};
       for(const k in names){
         const p=document.getElementById('montab-'+k);
         out[k]=p?p.getAttribute('aria-label'):null;}
       return out;}""")
-    for k, want in (("overview", "概览"), ("trend", "走势"),
+    for k, want in (("overview", "今日"), ("trend", "走势"),
                     ("details", "航班明细"), ("health", "渠道健康")):
         assert got.get(k) and want in got[k], (
             "tabpanel montab-%s 缺可访问名（got=%r）：读屏只播"

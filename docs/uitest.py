@@ -200,6 +200,8 @@ def main():
             ck("1280 四 tab 等宽无贴线",
                _mt["n"] == 4 and _mt["eq"] and not _mt["overlap"] and _mt["inside"])
             ck("概览默认可见", pg.is_visible("#montab-overview"))
+            ck("今日名称替代概览", (pg.inner_text(
+                "#montabs .mtab[data-t='overview']") or "").strip() == "今日")
             ck("r353 总览关注卡容器挂载", pg.evaluate(
                 "()=>!!document.getElementById('monWatchCard')"
                 "&&!!document.getElementById('monWatchList')"
@@ -616,10 +618,15 @@ def main():
             ck("空配置非概览子栏自愈+守卫", pg.evaluate(
                 """()=>{const _s=S.users,_t=MONTAB;let ok=true;
                 S.users=[];render();
-                ok=ok&&MONTAB==='overview'
-                 &&document.getElementById('montab-overview')
+                ok=ok&&(MONTAB==='overview'||MONTAB==='health')
+                 &&document.getElementById('montab-'+MONTAB)
                    .style.display==='';
+                showMonTab('health');
+                ok=ok&&MONTAB==='health'
+                 &&document.getElementById('montabs').style.display!=='none'
+                 &&document.getElementById('montab-health').style.display==='';
                 try{showMonTab('trend');}catch(e){ok=false;}
+                ok=ok&&MONTAB==='overview';  /* 其它空态子栏仍自愈 */
                 S.users=_s;render();showMonTab(_t,true);   /* 无条件回位（状态复位律） */
                 return ok;}"""))
 
@@ -1163,6 +1170,9 @@ def main():
             ck("favicon 就位", pg.evaluate(
                 "()=>!!document.querySelector('link[rel=icon]')"))
             # r368：单用户以吸顶用户 chip 常显当前范围（多用户再加 pills 行）
+            ck("用户切换唯一位于全局顶栏", pg.evaluate(
+                "()=>document.querySelectorAll('header #mtabUser').length===1"
+                "&&document.querySelectorAll('#mtabUser').length===1"))
             ck("单用户显示用户范围", pg.is_visible("#mtabUser")
                and "👤" in (pg.inner_text("#mtabUser") or ""))
 
@@ -2570,33 +2580,30 @@ def main():
                 "const ok=!!k&&k.getBoundingClientRect().top"
                 "<p.getBoundingClientRect().top;"
                 "p.style.display=d;return ok;}"))
-            # 红帽徽标：采集失败或推送连败（双源合成）点亮概览 tab
-            # 红点——渠道/推送异常在其他 tab 仍全局可见（可见性定律）
-            ck("EN-1 红帽徽标随最新轮失败点亮/熄灭", pg.evaluate(
+            # 全局渠道灯：采集失败或推送连败（双源合成）点亮，
+            # 无论停留在哪个子视图均可见。
+            ck("EN-1 全局渠道灯随最新轮失败点亮/熄灭", pg.evaluate(
                 "()=>{if(typeof renderPulseAlert!=='function')return false;"
                 "renderPulseAlert(2);"
-                "const on=document.getElementById('ovAlert')"
-                ".style.display!=='none';"
+                "const on=document.getElementById('channelLamp')"
+                ".classList.contains('bad');"
                 "renderPushChannels({channels:{}});renderPulseAlert(0);"
-                "const off=document.getElementById('ovAlert')"
-                ".style.display==='none';return on&&off;}"))
-            # EN-1b 红帽徽标几何行为钉：点亮态实际盒须有形状（空 <i>
-            # 内联元素 width 不参与布局，曾是 0 宽死档——display 态钉
-            # 锁「状态」锁不了「形状」，几何实测是唯一真相）
-            ck("EN-1b 红帽徽标点亮态实盒有形状", pg.evaluate(
+                "const off=!document.getElementById('channelLamp')"
+                ".classList.contains('bad');return on&&off;}"))
+            # 渠道灯状态点须有可见几何尺寸。
+            ck("EN-1b 全局渠道灯状态点可见", pg.evaluate(
                 "()=>{renderPulseAlert(2);"
-                "const a=document.getElementById('ovAlert');"
+                "const a=document.querySelector('#channelLamp i');"
                 "const w=a.getBoundingClientRect().width;"
                 "renderPushChannels({channels:{}});renderPulseAlert(0);"
-                "return w>=6;}"))
-            # EN-9（WebUI 审计）：徽标读屏语义——role+aria-label 静态
-            # 在位（display:none 天然从可访问性树移除，点亮即暴露），
-            # 渠道异常可见性定律对读屏不再缺失
-            ck("EN-9 红帽徽标读屏语义在位", pg.evaluate(
-                "()=>{const a=document.getElementById('ovAlert');"
-                "return !!a&&a.getAttribute('role')==='img'"
+                "return w>=8;}"))
+            ck("EN-9 全局渠道灯读屏语义在位", pg.evaluate(
+                "()=>{const a=document.getElementById('channelLamp');"
+                "return !!a&&a.tagName==='BUTTON'"
                 "&&(a.getAttribute('aria-label')||'')"
-                ".indexOf('通道有异常')>=0;}"))
+                ".indexOf('渠道状态')>=0"
+                "&&(a.getAttribute('title')||'')"
+                ".indexOf('点击查看渠道健康与登录')>=0;}"))
             # EN-2 桌面视图切换器吸顶：深滚切视图不回滚（≤540 同款能力）。
             # 几何行为钉（LESSONS：源码钉只证声明在场，几何钉是唯一真相）
             pg.set_viewport_size({"width": 1440, "height": 900})

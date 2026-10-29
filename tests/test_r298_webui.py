@@ -6,10 +6,8 @@ P1-1 qunar 用户侧跳转链接=触屏 H5 列表页（crawlers/qunar.py URL_TPL
 死），爬虫取数亦由 H5 兜底承载——链接与取数同源（渠道 PC 化挂羊头
 判例 LESSONS 十四§6 的反向回退面：只按正向执行过会漏反向回退）。
 
-P1-2 概览红帽徽标 ovAlert 结构性零宽：空 <i> 内联元素 width 不参与
-布局，点亮态实际盒 0×16px、任意主题从未渲染出形状——CSS 补
-inline-block 形状 + 卡色描边（激活蓝底上红点对比 1.02/1.60:1 双欠
-WCAG 3:1，卡色描边才是辨识主体）。
+P1-2 全局渠道状态灯替代概览红帽：让异常状态在各视图均可见，按钮
+可进入渠道健康与登录区域，并具有可见状态点和动态可访问名称。
 
 P2-1 航线摘要词面 _routes_txt 单源：同城市对聚合一段、日期随组——
 逐航线直拼曾产出「上海→海口、上海→海口、海口→上海」同对重复观感
@@ -128,11 +126,9 @@ def test_suspended_users_routes_txt_same_source():
     assert out[0]["routesTxt"] == "上海→海口 01-29、海口→上海 02-14", out
 
 
-def test_ovalert_css_shape_rule():
-    """P1-2：红点形状单源——inline-block 使 width 参与布局（内联盒
-    定律：空 <i> 的 7px 宽曾是死档），卡色描边在激活蓝底上以描边对比
-    达 3:1 辨识（红点本身对激活底 1.02/1.60:1 双欠）。"""
+def test_global_channel_lamp_has_visible_status_dot():
+    """全局渠道灯用有尺寸的圆点表达状态，并作为顶栏可操作控件。"""
     src = webui.PAGE
-    assert "#ovAlert{display:inline-block" in src, "形状规则缺席"
-    rule = [ln for ln in src.splitlines() if "#ovAlert{display:inline-block" in ln]
-    assert rule and "box-shadow" in rule[0] and "var(--card)" in rule[0], rule
+    assert 'id="channelLamp" type="button"' in src
+    assert ".channel-lamp i{width:8px;height:8px;border-radius:50%" in src
+    assert "function jumpChannelHealth()" in src

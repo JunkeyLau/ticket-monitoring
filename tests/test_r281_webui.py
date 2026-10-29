@@ -75,11 +75,11 @@ def test_cfgsearch_orphan_container_source_pin():
 
 # ---------- 行为钉 ----------
 
-def test_overview_alert_covers_push_streak(srv):
+def test_global_channel_lamp_covers_push_streak(srv):
     """R281-1 呈现面（推送审校 _scratch/r281_push_report.md §③）：
-    概览红帽只挂采集失败——钉钉 -1 幽灵期采集面全绿、推送通道连败
+    旧概览红帽只挂采集失败——钉钉 -1 幽灵期采集面全绿、推送通道连败
     34 轮 10h 期间控制台零主动暴露（本轮生产实录，￥1749 达标价静默
-    丢失）。修法=概览红帽双源合成：采集失败（pulse 轮）与推送连败
+    丢失）。修法=全局渠道灯双源合成：采集失败（pulse 轮）与推送连败
     （health 轮）各写各的缓存，任一非零即亮——两轮询独立刷新互不
     覆盖，推送源点亮后 pulse 轮写采集零不得熄灭。不动发送/落账。"""
     pw, page = srv
@@ -88,32 +88,32 @@ def test_overview_alert_covers_push_streak(srv):
     # 冻结轮询渲染源（LESSONS 二十七§6：墨迹类断言先冻结刷新源），
     # 防周期轮询用真实 demo 数据覆盖注入态
     page.evaluate("renderHealth=function(){};renderPulse=function(){}")
-    disp = lambda: page.evaluate(
-        "document.querySelector('#ovAlert').style.display")
-    # 基线：采集零失败 + 推送零连败 = 灭
+    bad = lambda: page.evaluate(
+        "document.querySelector('#channelLamp').classList.contains('bad')")
+    # 基线：采集零失败 + 推送零连败 = 不亮异常态
     page.evaluate("renderPulseAlert(0)")
     page.evaluate("renderPushChannels({channels:{}})")
-    assert disp() == "none", "双源清零后红帽应灭"
+    assert not bad(), "双源清零后全局渠道灯应退出异常态"
     # 推送连败 34 → 亮（不经 renderPulseAlert——health 轮独立点亮）
     page.evaluate(
         "renderPushChannels({channels:{dingtalk:{ok:0,fail:34,"
         "fail_streak:34,last:'2026-10-11 01:00:00',last_ok:''}}})")
-    assert disp() == "", "推送连败未点亮概览红帽（连败可感知缺口未收口）"
+    assert bad(), "推送连败未点亮全局渠道灯（连败可感知缺口未收口）"
     # 关键行为：pulse 轮写采集源 0 不得熄灭推送源（双源不互相覆盖）
     page.evaluate("renderPulseAlert(0)")
-    assert disp() == "", "pulse 轮覆盖了推送连败源（红帽闪烁互搏回归）"
+    assert bad(), "pulse 轮覆盖了推送连败源（状态灯闪烁互搏回归）"
     # 推送源清零 + 采集零失败 = 灭
     page.evaluate("renderPushChannels({channels:{}})")
     page.evaluate("renderPulseAlert(0)")
-    assert disp() == "none", "双源清零后红帽应灭"
+    assert not bad(), "双源清零后全局渠道灯应退出异常态"
     # 采集失败仍独立点亮（原语义零回归）
     page.evaluate("renderPulseAlert(2)")
-    assert disp() == "", "采集失败点亮面回归"
+    assert bad(), "采集失败未点亮全局渠道灯"
     # 推送连败清零后采集失败保持点亮
     page.evaluate(
         "renderPushChannels({channels:{dingtalk:{ok:9,fail:0,"
         "fail_streak:0,last:'',last_ok:''}}})")
-    assert disp() == "", "推送恢复后采集失败源被误熄"
+    assert bad(), "推送恢复后采集失败源被误熄"
 
 
 def test_cfgsearch_orphan_containers_hidden(srv):

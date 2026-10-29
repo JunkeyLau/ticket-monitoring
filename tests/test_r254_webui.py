@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """r254 WebUI 四案（审计报告 r254_webui_audit.md 收编）：
 
-W1 吸顶条右端用户切换 chip（P2-1）——多用户入口只驻留页顶 opscard，
-深滚明细/走势后切换须长滚回顶；montabs 两级吸顶的第二级右端加紧凑
-chip（复用 pickUser 单源 + userPills 同拍同步），深滚自救零长滚。
+W1 全局顶栏用户切换 chip（P2-1）——多用户入口只驻留页顶，
+深滚明细/走势后仍可切换；复用 pickUser 单源。
 
 W2 脉冲柱跳转带状态落地（P2-2）——柱点击原为「跳到区域」非「跳到
 目标」：落地健康 tab 顶后对应轮次可能挤出 96 格窗口视野。改带
@@ -34,18 +33,22 @@ def _page_src():
     return webui.PAGE
 
 
-# ---------- W1: montabs 右端用户切换 chip ----------
+# ---------- W1: 全局顶栏用户切换 chip ----------
 
 def test_w1_mtabuser_chip_present():
     src = _page_src()
-    assert 'id="mtabUser"' in src, "montabs 右端缺用户切换 chip 元素"
+    assert src.count('id="mtabUser"') == 1, "用户切换入口必须唯一"
+    header = src[src.index("<header"):src.index("</header>")]
+    assert 'id="mtabUser"' in header, "用户切换 chip 必须位于全局顶栏"
+    assert 'id="mtabUser"' not in src[src.index('id="montabs"'):src.index('id="montabs"') + 2500], \
+        "用户切换 chip 不应重复出现在监控子栏"
     assert "function mtabUserNext" in src, "缺循环切换函数"
     assert "pickUser((U+1)" in src or "pickUser((U + 1)" in src, \
-        "循环切换必须复用 pickUser 单源（选中态与 userPills 同拍）"
+        "循环切换必须复用 pickUser 单源"
 
 
-def test_w1_mtabuser_sync_with_userpills():
-    """chip 与 userPills 同拍同步：单用户也显示当前用户范围（r368 起）。"""
+def test_w1_mtabuser_sync_with_global_header():
+    """顶栏 chip 单用户显示范围、多用户显示当前用户。"""
     src = _page_src()
     i0 = src.index("function mtabUserSync")
     seg = src[i0:i0 + 1200]
@@ -57,8 +60,7 @@ def test_w1_mtabuser_sync_with_userpills():
 def test_w1_mtabuser_touch_floor():
     """触控 36px 地板族（十四§4）：uchip 声明在触控增强媒体块内。"""
     src = _page_src()
-    assert ".tabs .uchip" in src or "#montabs .uchip" in src, \
-        "uchip 缺触控地板声明"
+    assert ".hdx .uchip" in src, "顶栏 uchip 缺触控尺寸声明"
 
 
 # ---------- W2: 脉冲柱带状态落地 ----------

@@ -11,8 +11,8 @@
   ③ 零 console error（pageerror+console 收集器每用例独立挂，零带入）。
 
 覆盖入口（对照 _scratch/r324_monsync_audit.md §一/二 写点×投影面）：
-  概览    kpisum 明细/走势链、mchip 跳明细预置渠道、KPI numlink/整卡
-          外链窗（route 拦截+popup）、ovAlert 哨态；
+  今日    kpisum 明细/走势链、mchip 跳明细预置渠道、KPI numlink/整卡
+          外链窗（route 拦截+popup）、全局渠道灯跳健康；
   走势    航线片 togChart（chartTitle/calTitle 同拍=F1 回归面）、范围/
           模式片、图例、canvas hover 十字线（HPTS 状态）+点击跳明细锁日期；
   明细    表头排序（SORT+aria-sort+箭头+srtchip 三面）、类别 tabs、
@@ -341,15 +341,16 @@ def test_ov05_kpi_card_click_popup(page):
     ctx.unroute("**/*")
 
 
-def test_ov06_ovalert_sentinel_state(page):
-    """ovAlert 哨：demo 推送连败在场 → 红帽可见 + aria/title 词面
-    （哨是显隐投影件无点击动作——audit W27 双源合成）。"""
+def test_ov06_global_channel_lamp_routes_to_health(page):
+    """渠道异常由全局顶栏状态灯承载；点击可直达渠道健康面板。"""
     _goto(page)
-    assert page.evaluate(
-        "document.getElementById('ovAlert').style.display") == ""
-    assert page.get_attribute("#ovAlert", "aria-label") == \
-        "采集或推送通道有异常，详情见渠道健康"
-    assert "渠道健康" in page.get_attribute("#ovAlert", "title")
+    assert page.locator("header #channelLamp").count() == 1
+    assert page.get_attribute("#channelLamp", "aria-label")
+    assert "渠道状态" in page.get_attribute("#channelLamp", "aria-label")
+    page.click("#channelLamp")
+    page.wait_for_timeout(250)
+    assert page.evaluate("MONTAB") == "health"
+    assert page.is_visible("#montab-health")
 
 
 # ================= §二 走势·日历 =================
