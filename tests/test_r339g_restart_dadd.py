@@ -371,10 +371,13 @@ def test_add_watch_opens_linear_four_step_wizard_and_intl_deadline_defaults_unli
       const incompatibleChange=cfgWizardStageRoutes(incompatible,draft,'');
       const disabled={routes:[{from:'SHA',to:'JFK',dates:['2026-12-01'],enabled:false,alert_direct:500,alert_transfer:500,transfer_arrival_max:'不限',transfer_layover_min:0,min_baggage:0,no_cross:false}]};
       const disabledChange=cfgWizardStageRoutes(disabled,draft,'');
+      const overlap={routes:[{from:'SHA',to:'JFK',dates:['2026-12-17'],alert_direct:1000,alert_transfer:1000}]};
+      const overlapChange=cfgWizardStageRoutes(overlap,draft,'');
       return {fresh:freshSnapshot,added:added.added.length,restoredFresh:fresh.routes.length===0,
         merged:JSON.stringify(merged.routes),mergedCount:changes.merged.length,addedCount:changes.added.length,
         incompatible:{dates:incompatible.routes[0].dates,added:incompatibleChange.added.length},
-        disabled:{enabled:disabled.routes[0].enabled,added:disabledChange.added.length}};
+        disabled:{enabled:disabled.routes[0].enabled,added:disabledChange.added.length},
+        overlap:{date:overlap.routes[0].dates[0],added:overlapChange.added.length,conflicts:overlapChange.conflicts.length}};
     }""")
     fresh_routes = __import__('json').loads(staged['fresh'])
     assert staged['added'] == 2
@@ -392,6 +395,7 @@ def test_add_watch_opens_linear_four_step_wizard_and_intl_deadline_defaults_unli
     assert merged_routes[5]['dates'] == ['2026-12-04']  # disabled route untouched
     assert staged['incompatible'] == {'dates':['2026-12-01'],'added':1}
     assert staged['disabled'] == {'enabled':False,'added':1}
+    assert staged['overlap'] == {'date':'2026-12-17','added':0,'conflicts':1}
     concurrent = page.evaluate("""async() => {
       const user=CFG.find(u=>u.name===cfgWatchName());
       const route={from:'SHA',to:'JFK',dates:['2026-12-01'],alert_direct:500,alert_transfer:500,transfer_arrival_max:'不限',transfer_layover_min:0,min_baggage:0,no_cross:false};
@@ -410,6 +414,39 @@ def test_add_watch_opens_linear_four_step_wizard_and_intl_deadline_defaults_unli
     assert concurrent['during'] == ['2026-12-01']
     assert concurrent['after'] == ['2026-12-11']
     assert concurrent['open']
+    conflict = page.evaluate("""async() => {
+      const user=CFG.find(u=>u.name===cfgWatchName());
+      const route={from:'SHA',to:'JFK',dates:['2026-12-17'],alert_direct:1000,alert_transfer:1000};
+      user.routes.push(route);Object.assign(CFG_WIZ,{open:true,step:4,from:'SHA',to:'JFK',fromName:'上海',toName:'纽约',dates:['2026-12-17'],returnDate:'',rows:[],selected:'',target:'500',strong:true});cfgWatchRender();
+      let posted=false;const savedFetch=window.fetch;window.fetch=async()=>{posted=true;return {ok:true,status:200,json:async()=>({ok:true})}};
+      await cfgWizardSave();window.fetch=savedFetch;const hint=document.querySelector('#cwzHint').textContent;
+      const dates=route.dates.slice();user.routes.splice(user.routes.indexOf(route),1);
+      return {posted,dates,open:CFG_WIZ.open,hint};
+    }""")
+    assert not conflict['posted'] and conflict['dates'] == ['2026-12-17']
+    assert conflict['open'] and '不同目标价或筛选' in conflict['hint']
+    delayed = page.evaluate("""async() => {
+      const userName=cfgWatchName();
+      Object.assign(CFG_WIZ,{open:true,step:4,from:'SHA',to:'JFK',fromName:'上海',toName:'纽约',dates:['2026-12-17'],returnDate:'2026-12-20',rows:[],selected:'',target:'500',strong:true});cfgWatchRender();
+      let finish,body;const savedFetch=window.fetch;
+      window.fetch=async(url,options)=>{
+        if(String(url)==='/api/config')return new Promise(resolve=>{finish=resolve;body=JSON.parse(options.body)});
+        return {ok:true,status:200,json:async()=>({ok:true,watches:[]})};
+      };
+      const generation=CFG_WIZ.generation,saving=cfgWizardSave();await new Promise(resolve=>setTimeout(resolve,0));
+      document.querySelector('#cwWizard [data-cwzcancel]').click();
+      const stayedOpen=CFG_WIZ.open;const reopening=cfgWatchWizardOpen();await reopening;
+      const sameGeneration=CFG_WIZ.generation===generation;
+      CFG_WIZ.returnDate='2026-12-25';
+      finish({ok:true,status:200,json:async()=>({ok:true,revision:'delayed-revision'})});
+      await saving;window.fetch=savedFetch;
+      const routes=(body.users.find(u=>u.name===userName).routes||[]).filter(r=>(r.from==='SHA'&&r.to==='JFK')||(r.from==='JFK'&&r.to==='SHA'));
+      return {stayedOpen,sameGeneration,open:CFG_WIZ.open,dates:routes.map(r=>[r.from,r.dates,r.ret_date||'']),returnDate:CFG_WIZ.returnDate};
+    }""")
+    assert delayed['stayedOpen'] and delayed['sameGeneration']
+    assert not delayed['open'] and delayed['returnDate'] == '2026-12-25'
+    assert ['JFK', ['2026-12-20'], ''] in delayed['dates']
+    assert ['JFK', ['2026-12-25'], ''] not in delayed['dates']
     # An uncertain POST with no durable receipt must leave live CFG untouched
     # while retaining the wizard draft. Repeated retry attempts cannot append
     # duplicate outbound/return routes before the server confirms a save.
